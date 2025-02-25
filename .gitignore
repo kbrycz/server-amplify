@@ -1,0 +1,34 @@
+# Node.js dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json  # Optional: Include if you prefer Yarn over npm lockfiles
+
+# Firebase credentials and sensitive files
+*.json  # Excludes all JSON files by default (adjust if you need specific JSON files tracked)
+/serviceAccountKey.json  # Replace with the actual name of your Firebase service account key file
+firebase-adminsdk-*.json  # Common pattern for Firebase service account keys
+
+# Environment variables
+.env  # Local environment variable files
+.env.local
+.env.development
+.env.production
+
+# Logs and build artifacts
+logs/
+*.log
+*.log.*
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# OS-generated files
+.DS_Store  # macOS
+Thumbs.db  # Windows
+
+# Google Cloud-specific
+gcloudignore  # If you use a custom .gcloudignore, this won't conflict
+*.pem  # Certificate files that might be generated
