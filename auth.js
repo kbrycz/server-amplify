@@ -11,7 +11,7 @@ const verifyToken = async (req, res, next) => {
   }
   try {
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-    req.user = decodedToken; // Attach decoded user data to the request
+    req.user = decodedToken;
     next();
   } catch (error) {
     return res.status(401).send('Unauthorized: Invalid token');
@@ -20,12 +20,34 @@ const verifyToken = async (req, res, next) => {
 
 // Protected route to get user data
 router.get('/user', verifyToken, (req, res) => {
-  res.json({ user: req.user }); // Returns user data from the verified token
+  res.json({ user: req.user });
 });
 
-// Example protected route
+// Protected route for sample data
 router.get('/data', verifyToken, (req, res) => {
   res.json({ message: 'This is protected data', user: req.user });
+});
+
+// Sign-up endpoint (POST /auth/signup)
+router.post('/signup', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).send('Missing email or password');
+  }
+  try {
+    const userRecord = await admin.auth().createUser({
+      email,
+      password,
+      emailVerified: false // Set to true if you verify elsewhere
+    });
+    res.status(201).json({
+      message: 'User created successfully',
+      uid: userRecord.uid,
+      email: userRecord.email
+    });
+  } catch (error) {
+    res.status(400).send(`Error creating user: ${error.message}`);
+  }
 });
 
 module.exports = router;
