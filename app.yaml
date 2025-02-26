@@ -1,5 +1,5 @@
-runtime: nodejs18
+runtime: nodejs20  # Updated to Node.js 20
 env: standard
-instance_class: F1  # Free tier; adjust if needed (e.g., F2 for more power)
+instance_class: F1
 automatic_scaling:
-  max_instances: 1  # Keeps costs low; increase for production
+  max_instances: 1

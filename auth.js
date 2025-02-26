@@ -1,52 +1,77 @@
 const express = require('express');
-const admin = require('firebase-admin');
+const admin = require('./firebase'); // Import the initialized Firebase instance
+const { verifyToken } = require('./middleware');
 
 const router = express.Router();
 
-// Middleware to verify Firebase ID token
-const verifyToken = async (req, res, next) => {
-  const idToken = req.headers.authorization?.split('Bearer ')[1];
-  if (!idToken) {
-    return res.status(401).send('Unauthorized: No token provided');
-  }
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    req.user = decodedToken;
-    next();
-  } catch (error) {
-    return res.status(401).send('Unauthorized: Invalid token');
-  }
-};
+// Create user profile after signup
+router.post('/signup', verifyToken, async (req, res) => {
+  console.log('Received signup request with body:', req.body);
+  const { firstName, lastName } = req.body;
+  const uid = req.user.uid;
+  const email = req.user.email;
 
-// Protected route to get user data
+  console.log('Creating profile for UID:', uid); // Debug UID
+  if (!firstName || !lastName || !firstName.trim() || !lastName.trim()) {
+    return res.status(400).send('First name and last name are required');
+  }
+
+  try {
+    await admin.firestore().collection('users').doc(uid).set({
+      email,
+      firstName,
+      lastName,
+      displayName: `${firstName} ${lastName}`.trim(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      preferences: {},
+      campaigns: []
+    });
+    console.log('Firestore profile created successfully for UID:', uid);
+    res.status(201).json({
+      message: 'Profile created successfully',
+      uid,
+      email
+    });
+  } catch (error) {
+    console.error('Error creating Firestore profile:', error);
+    res.status(500).send(`Failed to create profile: ${error.message}`);
+  }
+});
+
+// Fetch user profile
+router.get('/profile', verifyToken, async (req, res) => {
+  const uid = req.user.uid;
+  console.log('Fetching profile for UID:', uid); // Debug UID
+  try {
+    const userDoc = await admin.firestore().collection('users').doc(uid).get();
+    console.log('Document exists:', userDoc.exists); // Debug document existence
+    if (!userDoc.exists) {
+      return res.status(404).send('Profile not found');
+    }
+    res.status(200).json(userDoc.data());
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+    res.status(500).send(`Failed to fetch profile: ${error.message}`);
+  }
+});
+
+// Existing routes
 router.get('/user', verifyToken, (req, res) => {
   res.json({ user: req.user });
 });
 
-// Protected route for sample data
 router.get('/data', verifyToken, (req, res) => {
   res.json({ message: 'This is protected data', user: req.user });
 });
 
-// Sign-up endpoint (POST /auth/signup)
-router.post('/signup', async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).send('Missing email or password');
-  }
+router.delete('/delete-account', verifyToken, async (req, res) => {
   try {
-    const userRecord = await admin.auth().createUser({
-      email,
-      password,
-      emailVerified: false // Set to true if you verify elsewhere
-    });
-    res.status(201).json({
-      message: 'User created successfully',
-      uid: userRecord.uid,
-      email: userRecord.email
-    });
+    const uid = req.user.uid;
+    await admin.auth().deleteUser(uid);
+    await admin.firestore().collection('users').doc(uid).delete();
+    res.status(200).json({ message: 'Account deleted successfully' });
   } catch (error) {
-    res.status(400).send(`Error creating user: ${error.message}`);
+    res.status(500).json({ error: `Error deleting account: ${error.message}` });
   }
 });
 
