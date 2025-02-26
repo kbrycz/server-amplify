@@ -4,6 +4,7 @@ const admin = require('./firebase'); // Import the initialized Firebase instance
 const authRoutes = require('./auth');
 const userRoutes = require('./user');
 const campaignRoutes = require('./campaign');
+const campaignAIRoutes = require('./campaign-ai');
 
 const app = express();
 
@@ -12,6 +13,7 @@ app.use(express.json());
 
 // Mount the campaign routes under '/campaign'
 app.use('/campaign', campaignRoutes);
+app.use('/campaign', campaignAIRoutes);
 app.use('/auth', authRoutes);
 app.use('/user', userRoutes);
 
