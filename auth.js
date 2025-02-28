@@ -24,7 +24,8 @@ router.post('/signup', verifyToken, async (req, res) => {
       displayName: `${firstName} ${lastName}`.trim(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       preferences: {},
-      campaigns: []
+      campaigns: [],
+      credits: 10  // New field with initial 10 credits
     });
     console.log('Firestore profile created successfully for UID:', uid);
     res.status(201).json({

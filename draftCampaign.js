@@ -32,13 +32,14 @@ router.post('/drafts', verifyToken, async (req, res) => {
   }
 });
 
-// Read all draft campaigns for the authenticated user
+// Read all draft campaigns for the authenticated user, sorted by most recent (dateModified descending)
 router.get('/drafts', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     console.log('Fetching draft campaigns for user:', userId);
     const snapshot = await db.collection('draftCampaigns')
       .where('userId', '==', userId)
+      .orderBy('dateModified', 'desc')
       .get();
     const drafts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     console.log(`Found ${drafts.length} draft campaigns for user:`, userId);
@@ -48,6 +49,26 @@ router.get('/drafts', verifyToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to retrieve draft campaigns', message: error.message });
   }
 });
+
+// Count draft campaigns for the authenticated user
+router.get('/drafts/count', verifyToken, async (req, res) => {
+    try {
+      const userId = req.user.uid;
+      console.log('Counting draft campaigns for user:', userId);
+  
+      // Instead of .count(), do a .get() and use snapshot.size
+      const snapshot = await db.collection('draftCampaigns')
+        .where('userId', '==', userId)
+        .get();
+  
+      const count = snapshot.size;
+      console.log('Found draft campaign count:', count);
+      res.status(200).json({ count });
+    } catch (error) {
+      console.error('Error counting draft campaigns:', error);
+      res.status(500).json({ error: 'Failed to count draft campaigns', message: error.message });
+    }
+  });
 
 // Read a specific draft campaign by ID (account-specific)
 router.get('/drafts/:id', verifyToken, async (req, res) => {

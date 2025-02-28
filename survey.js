@@ -177,4 +177,42 @@ router.get('/videos/:campaignId', verifyToken, async (req, res) => {
   }
 });
 
+// GET /survey/videos/:campaignId/count - Authenticated endpoint to count videos for a campaign
+router.get('/videos/:campaignId/count', verifyToken, async (req, res) => {
+    console.log('Received GET request to /survey/videos/:campaignId/count');
+    const { campaignId } = req.params;
+    const userId = req.user.uid;
+    console.log('Campaign ID:', campaignId);
+    console.log('User ID from token:', userId);
+  
+    try {
+      // Verify campaign existence and ownership
+      console.log('Verifying campaign existence and ownership for campaignId:', campaignId);
+      const campaignRef = db.collection('campaigns').doc(campaignId);
+      const campaignDoc = await campaignRef.get();
+      if (!campaignDoc.exists) {
+        console.log('Campaign not found for campaignId:', campaignId);
+        return res.status(404).json({ error: 'Campaign not found' });
+      }
+      const campaignData = campaignDoc.data();
+      if (campaignData.userId !== userId) {
+        console.log('Forbidden: User does not own this campaign');
+        return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
+      }
+  
+      console.log('Counting videos for campaignId:', campaignId);
+      // Instead of .count(), do a .get() and use snapshot.size
+      const snapshot = await db.collection('surveyVideos')
+        .where('campaignId', '==', campaignId)
+        .get();
+  
+      const count = snapshot.size;
+      console.log('Found video count:', count);
+      res.status(200).json({ count });
+    } catch (error) {
+      console.error('Error counting videos:', error);
+      res.status(500).json({ error: 'Internal server error', message: error.message });
+    }
+  });
+
 module.exports = router;

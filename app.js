@@ -9,6 +9,7 @@ const surveyRoutes = require('./survey');
 const draftCampaignRoutes = require('./draftCampaign');
 const videoEditorRoutes = require('./videoEditor');
 const videoProcessorRoutes = require('./videoProcessor');
+const representativesRoutes = require('./representatives'); // Add this line
 
 const app = express();
 app.use(express.json());
@@ -28,6 +29,7 @@ app.use('/survey', surveyRoutes);
 app.use('/draftCampaign', draftCampaignRoutes);
 app.use('/videoEditor', videoEditorRoutes);
 app.use('/videoProcessor', videoProcessorRoutes);
+app.use('/representatives', representativesRoutes); // Add this line
 
 
 app.get('/', (req, res) => {
