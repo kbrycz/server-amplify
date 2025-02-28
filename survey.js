@@ -51,9 +51,18 @@ router.post('/upload', upload.single('video'), async (req, res) => {
     }
     console.log('Campaign exists:', campaignDoc.data());
 
+    // Get the userId from the campaign
+    const campaignData = campaignDoc.data();
+    const userId = campaignData.userId;
+    if (!userId) {
+      console.log('Campaign does not have a userId');
+      return res.status(500).json({ error: 'Campaign does not have an associated userId' });
+    }
+
     // Create a new document in surveyVideos collection
     const videoData = {
       campaignId,
+      userId, // Add userId from campaign
       firstName: firstName || '',
       lastName: lastName || '',
       email: email || '',

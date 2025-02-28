@@ -6,6 +6,9 @@ const userRoutes = require('./user');
 const campaignRoutes = require('./campaign');
 const campaignAIRoutes = require('./campaign-ai');
 const surveyRoutes = require('./survey');
+const draftCampaignRoutes = require('./draftCampaign');
+const videoEditorRoutes = require('./videoEditor');
+const videoProcessorRoutes = require('./videoProcessor');
 
 const app = express();
 app.use(express.json());
@@ -14,14 +17,18 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
-  }));
+}));
 
-// Mount the campaign routes under '/campaign'
+// Mount the routes
 app.use('/campaign', campaignRoutes);
 app.use('/campaign', campaignAIRoutes);
 app.use('/auth', authRoutes);
 app.use('/user', userRoutes);
 app.use('/survey', surveyRoutes);
+app.use('/draftCampaign', draftCampaignRoutes);
+app.use('/videoEditor', videoEditorRoutes);
+app.use('/videoProcessor', videoProcessorRoutes);
+
 
 app.get('/', (req, res) => {
   res.send('Welcome to the API');
