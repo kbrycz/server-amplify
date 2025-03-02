@@ -1,6 +1,8 @@
+// campaign.js
 const express = require('express');
 const admin = require('../firebase'); // Import the initialized Firebase instance
 const { verifyToken } = require('../middleware'); // Import your middleware
+const { logActivity } = require('../activityLogger'); // Import the activity logger
 const router = express.Router();
 
 // Initialize Firebase Admin SDK (only if not already initialized elsewhere)
@@ -23,6 +25,8 @@ router.post('/campaigns', verifyToken, async (req, res) => {
       dateModified: admin.firestore.FieldValue.serverTimestamp(),
     };
     const campaignRef = await db.collection('campaigns').add(campaignData);
+    // Log activity: campaign created
+    await logActivity(userId, 'campaign_created', `Created campaign: ${campaignData.name || 'Untitled'}`, { campaignId: campaignRef.id });
     res.status(201).json({ id: campaignRef.id, ...campaignData });
   } catch (error) {
     console.error('Error creating campaign:', error);
@@ -118,6 +122,8 @@ router.put('/campaigns/:id', verifyToken, async (req, res) => {
       ...req.body,
       dateModified: admin.firestore.FieldValue.serverTimestamp(),
     });
+    // Log activity: campaign edited
+    await logActivity(userId, 'campaign_edited', `Edited campaign: ${campaignData.name || 'Untitled'}`, { campaignId: req.params.id });
     res.status(200).json({ id: req.params.id, ...req.body });
   } catch (error) {
     console.error('Error updating campaign:', error);
@@ -139,6 +145,8 @@ router.delete('/campaigns/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
     }
     await campaignRef.delete();
+    // Log activity: campaign deleted
+    await logActivity(userId, 'campaign_deleted', `Deleted campaign: ${campaignData.name || 'Untitled'}`, { campaignId: req.params.id });
     res.status(200).json({ message: 'Campaign deleted successfully' });
   } catch (error) {
     console.error('Error deleting campaign:', error);

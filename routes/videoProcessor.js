@@ -1,3 +1,4 @@
+// process-video.js
 const express = require('express');
 const admin = require('../firebase');
 const { verifyToken } = require('../middleware');
@@ -12,7 +13,9 @@ const SHOTSTACK_API_KEY = process.env.SHOTSTACK_API_KEY || 'fZYrhQ2UoW3yERhBahVE
 const SHOTSTACK_API_URL = 'https://api.shotstack.io/edit/stage/render';
 const SHOTSTACK_STATUS_URL = 'https://api.shotstack.io/edit/stage/render/';
 
-// Utility function to generate a signed URL for a Firebase Storage file
+/**
+ * Helper function to generate a signed URL for a Firebase Storage file.
+ */
 async function generateSignedUrl(filePath) {
   console.log('Generating signed URL for file:', filePath);
   try {
@@ -30,7 +33,9 @@ async function generateSignedUrl(filePath) {
   }
 }
 
-// Utility function to get video duration (placeholder; replace with actual implementation)
+/**
+ * Helper function to get video duration (placeholder; replace with actual implementation).
+ */
 async function getVideoDuration(videoUrl) {
   try {
     // Placeholder: assumes 2 minutes. For production, use ffprobe or similar
@@ -41,17 +46,27 @@ async function getVideoDuration(videoUrl) {
   }
 }
 
+/**
+ * Helper function to create an alert/notification document.
+ */
+async function createAlert(userId, alertType, message, extraData = {}) {
+  try {
+    await db.collection('alerts').add({
+      userId,
+      alertType,
+      message,
+      extraData,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (err) {
+    console.error('Error creating alert:', err);
+  }
+}
+
 // POST /process-video - Process a video into a polished short
 router.post('/process-video', verifyToken, async (req, res) => {
   const userId = req.user.uid;
-  const { 
-    videoId, 
-    desiredLength, 
-    transitionEffect, 
-    captionText, 
-    backgroundMusic, 
-    outputResolution 
-  } = req.body;
+  const { videoId, desiredLength, transitionEffect, captionText, backgroundMusic, outputResolution } = req.body;
 
   if (!videoId) {
     console.log('Validation Failed: videoId is required');
@@ -88,8 +103,6 @@ router.post('/process-video', verifyToken, async (req, res) => {
     // Get the video URL from Firebase Storage and generate a signed URL
     const videoGsUrl = videoData.videoUrl; // gs:// URL
     console.log('Original video URL:', videoGsUrl);
-
-    // Extract the file path from the gs:// URL
     const gsPrefix = 'gs://amplify-dev-6b1c7.firebasestorage.app/';
     if (!videoGsUrl.startsWith(gsPrefix)) {
       console.log('Invalid video URL format:', videoGsUrl);
@@ -97,8 +110,6 @@ router.post('/process-video', verifyToken, async (req, res) => {
     }
     const filePath = videoGsUrl.substring(gsPrefix.length);
     console.log('Extracted file path:', filePath);
-
-    // Generate a signed URL for the video
     const signedUrl = await generateSignedUrl(filePath);
 
     // Check video duration
@@ -309,6 +320,9 @@ router.post('/process-video', verifyToken, async (req, res) => {
     const aiVideoRef = await db.collection('aiVideos').add(aiVideoData);
     console.log('Created aiVideos document with ID:', aiVideoRef.id);
 
+    // Create a success alert for the user
+    await createAlert(userId, 'enhancement_success', 'Your video has been enhanced successfully.', { videoId, renderId, processedVideoUrl: permanentUrl });
+
     res.status(201).json({
       message: 'Video processed successfully',
       aiVideoId: aiVideoRef.id,
@@ -316,6 +330,12 @@ router.post('/process-video', verifyToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Error in process-video endpoint:', error.message);
+    // Create a failure alert for the user
+    try {
+      await createAlert(req.user.uid, 'enhancement_failure', `Video enhancement failed: ${error.message}`, { videoId });
+    } catch (alertErr) {
+      console.error('Error creating failure alert:', alertErr.message);
+    }
     if (error.response) {
       console.error('Shotstack API error response:', JSON.stringify(error.response.data, null, 2));
     }

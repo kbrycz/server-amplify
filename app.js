@@ -12,6 +12,8 @@ const videoProcessorRoutes = require('./routes/videoProcessor');
 const representativesRoutes = require('./routes/representatives'); // Add this line
 const videoEnhancerRoutes = require('./routes/video-enhancer');
 const thumbnailEndpoint = require('./routes/thumbnailEndpoint');
+const recentActivity = require('./routes/recentActivity');
+const alertsRoutes = require('./routes/alerts');
 
 const app = express();
 app.use(express.json());
@@ -34,7 +36,8 @@ app.use('/videoProcessor', videoProcessorRoutes);
 app.use('/representatives', representativesRoutes); // Add this line
 app.use('/videoEnhancer', videoEnhancerRoutes);
 app.use('/thumbnailEndpoint', thumbnailEndpoint);
-
+app.use('/activity', recentActivity);
+app.use('/alerts', alertsRoutes);
 
 
 app.get('/', (req, res) => {
