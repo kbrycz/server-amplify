@@ -1,15 +1,17 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('./firebase'); // Import the initialized Firebase instance
-const authRoutes = require('./auth');
-const userRoutes = require('./user');
-const campaignRoutes = require('./campaign');
-const campaignAIRoutes = require('./campaign-ai');
-const surveyRoutes = require('./survey');
-const draftCampaignRoutes = require('./draftCampaign');
-const videoEditorRoutes = require('./videoEditor');
-const videoProcessorRoutes = require('./videoProcessor');
-const representativesRoutes = require('./representatives'); // Add this line
+const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/user');
+const campaignRoutes = require('./routes/campaign');
+const campaignAIRoutes = require('./routes/campaign-ai');
+const surveyRoutes = require('./routes/survey');
+const draftCampaignRoutes = require('./routes/draftCampaign');
+const videoEditorRoutes = require('./routes/videoEditor');
+const videoProcessorRoutes = require('./routes/videoProcessor');
+const representativesRoutes = require('./routes/representatives'); // Add this line
+const videoEnhancerRoutes = require('./routes/video-enhancer');
+const thumbnailEndpoint = require('./routes/thumbnailEndpoint');
 
 const app = express();
 app.use(express.json());
@@ -30,6 +32,9 @@ app.use('/draftCampaign', draftCampaignRoutes);
 app.use('/videoEditor', videoEditorRoutes);
 app.use('/videoProcessor', videoProcessorRoutes);
 app.use('/representatives', representativesRoutes); // Add this line
+app.use('/videoEnhancer', videoEnhancerRoutes);
+app.use('/thumbnailEndpoint', thumbnailEndpoint);
+
 
 
 app.get('/', (req, res) => {

@@ -1,6 +1,6 @@
 const express = require('express');
-const admin = require('./firebase'); // Import the initialized Firebase instance
-const { verifyToken } = require('./middleware'); // Import your middleware
+const admin = require('../firebase'); // Import the initialized Firebase instance
+const { verifyToken } = require('../middleware'); // Import your middleware
 const router = express.Router();
 
 // Initialize Firebase Admin SDK (only if not already initialized elsewhere)
@@ -46,20 +46,40 @@ router.get('/campaigns', verifyToken, async (req, res) => {
   }
 });
 
+// NEW ENDPOINT: Read the most recent campaign for the authenticated user
+router.get('/campaigns/recent', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const snapshot = await db.collection('campaigns')
+      .where('userId', '==', userId)
+      .orderBy('dateModified', 'desc')
+      .limit(1)
+      .get();
+    if (snapshot.empty) {
+      return res.status(404).json({ error: 'No campaigns found' });
+    }
+    const campaignDoc = snapshot.docs[0];
+    res.status(200).json({ id: campaignDoc.id, ...campaignDoc.data() });
+  } catch (error) {
+    console.error('Error retrieving recent campaign:', error);
+    res.status(500).json({ error: 'Failed to retrieve recent campaign', message: error.message });
+  }
+});
+
 // Count campaigns for the authenticated user
 router.get('/campaigns/count', verifyToken, async (req, res) => {
-    try {
-      const userId = req.user.uid;
-      const snapshot = await db.collection('campaigns')
-        .where('userId', '==', userId)
-        .get();
-      const count = snapshot.size;
-      res.status(200).json({ count });
-    } catch (error) {
-      console.error('Error counting campaigns:', error);
-      res.status(500).json({ error: 'Failed to count campaigns', message: error.message });
-    }
-  });
+  try {
+    const userId = req.user.uid;
+    const snapshot = await db.collection('campaigns')
+      .where('userId', '==', userId)
+      .get();
+    const count = snapshot.size;
+    res.status(200).json({ count });
+  } catch (error) {
+    console.error('Error counting campaigns:', error);
+    res.status(500).json({ error: 'Failed to count campaigns', message: error.message });
+  }
+});
 
 // Read a specific campaign by ID (account-specific)
 router.get('/campaigns/:id', verifyToken, async (req, res) => {
