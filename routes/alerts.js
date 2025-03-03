@@ -15,6 +15,7 @@ router.get('/', verifyToken, async (req, res) => {
       .collection('alerts')
       .where('userId', '==', userId)
       .orderBy('createdAt', 'desc')
+      .limit(10)
       .get();
 
     const alerts = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));

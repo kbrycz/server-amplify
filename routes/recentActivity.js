@@ -14,7 +14,7 @@ router.get('/', verifyToken, async (req, res) => {
     const snapshot = await db.collection('activity')
       .where('userId', '==', userId)
       .orderBy('createdAt', 'desc')
-      .limit(50)
+      .limit(25)
       .get();
     const activities = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     res.status(200).json(activities);

@@ -1,4 +1,3 @@
-// process-video.js
 const express = require('express');
 const admin = require('../firebase');
 const { verifyToken } = require('../middleware');
@@ -9,7 +8,7 @@ const db = admin.firestore();
 const storage = admin.storage();
 
 // Shotstack API Configuration
-const SHOTSTACK_API_KEY = process.env.SHOTSTACK_API_KEY || 'fZYrhQ2UoW3yERhBahVEeFzTOrnbFig5r2UtQJjH';
+const SHOTSTACK_API_KEY = process.env.SHOTSTACK_API_KEY;
 const SHOTSTACK_API_URL = 'https://api.shotstack.io/edit/stage/render';
 const SHOTSTACK_STATUS_URL = 'https://api.shotstack.io/edit/stage/render/';
 
@@ -258,7 +257,7 @@ router.post('/process-video', verifyToken, async (req, res) => {
     const renderId = shotstackResponse.data.response.id;
     console.log('Shotstack render initiated, renderId:', renderId);
 
-    // Poll for render completion
+    // Poll for render completion (5 seconds interval, up to 5 minutes)
     let renderStatus;
     let processedVideoUrl;
     let pollAttempts = 0;
@@ -380,7 +379,7 @@ router.get('/ai-videos/campaign/:campaignId/count', verifyToken, async (req, res
   }
 });
 
-// GET /ai-videos - Retrieve all processed videos for the user
+// GET /ai-videos - Retrieve all processed videos for the user (most recent first)
 router.get('/ai-videos', verifyToken, async (req, res) => {
   const userId = req.user.uid;
   console.log('Fetching aiVideos for user:', userId);
@@ -388,6 +387,7 @@ router.get('/ai-videos', verifyToken, async (req, res) => {
   try {
     const snapshot = await db.collection('aiVideos')
       .where('userId', '==', userId)
+      .orderBy('createdAt', 'desc')
       .get();
 
     const aiVideos = snapshot.docs.map((doc) => ({
@@ -403,7 +403,7 @@ router.get('/ai-videos', verifyToken, async (req, res) => {
   }
 });
 
-// GET /ai-videos/campaign/:campaignId - Retrieve all processed videos for a specific campaign
+// GET /ai-videos/campaign/:campaignId - Retrieve all processed videos for a specific campaign (most recent first)
 router.get('/ai-videos/campaign/:campaignId', verifyToken, async (req, res) => {
   const { campaignId } = req.params;
   const userId = req.user.uid;
@@ -427,6 +427,7 @@ router.get('/ai-videos/campaign/:campaignId', verifyToken, async (req, res) => {
     console.log('Querying aiVideos for campaignId:', campaignId);
     const snapshot = await db.collection('aiVideos')
       .where('campaignId', '==', campaignId)
+      .orderBy('createdAt', 'desc')
       .get();
 
     const aiVideos = await Promise.all(snapshot.docs.map(async (doc) => {
