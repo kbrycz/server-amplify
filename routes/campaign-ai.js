@@ -17,49 +17,87 @@ const PREPROMPT = `
 You are a helpful assistant tasked with generating a JSON object for a "Create Campaign" form based on a user's prompt. The JSON must include the following fields:
 
 {
-  "name": "string",
+  "title": "string",
   "description": "string",
   "category": "string",
+  "subcategory": "string",
   "businessName": "string",
   "website": "string",
   "email": "string",
   "phone": "string",
+  "theme": "string",
   "surveyQuestions": ["string", "string", ...]
 }
 
-Always return a complete JSON object, even if the prompt is incomplete or unclear. For fields you can’t determine, use placeholder values like "Unknown", "TBD", or "" (empty string). For surveyQuestions, provide at least two generic questions if none are specified.
+Always return a complete JSON object, even if the prompt is incomplete or unclear. For fields you can't determine, use blank values like "" (empty string). For surveyQuestions, provide at least two generic questions if none are specified.
 
-Example:
-Prompt: "Create a campaign for a pet adoption event"
-Response:
+### Field Constraints:
+- **"category"**: Must be one of: "political", "business", "nonprofit", "education", "social".
+- **"subcategory"**: Must correspond to the selected "category" based on these options:
+  - "political": ["federal", "state", "local"]
+  - "business": ["retail", "service", "tech", "hospitality", "healthcare", "other"]
+  - "nonprofit": ["environment", "education", "health", "social", "arts", "other"]
+  - "education": ["k12", "university", "college", "vocational", "other"]
+  - "social": ["lifestyle", "tech", "fashion", "food", "travel", "fitness", "other"]
+  If the prompt doesn't specify a subcategory, choose "other" if available for the category, or the most generic option.
+- **"theme"**: Must be one of: "sunset", "modern", "professional", "fun", "elegant", "friendly", "default". Choose a theme that matches the campaign's context or tone.
+
+### Instructions:
+- Use the prompt to infer the most appropriate values for each field.
+- Ensure "subcategory" matches the selected "category" from the defined options.
+- Select a "theme" that fits the campaign's purpose or vibe.
+
+### Examples:
+**Prompt**: "Create a campaign for a pet adoption event"
+**Response**:
 {
-  "name": "Pet Adoption Event",
+  "title": "Pet Adoption Event",
   "description": "A campaign to promote pet adoptions in the local community.",
-  "category": "Animal Welfare",
+  "category": "nonprofit",
+  "subcategory": "other",
   "businessName": "Local Pet Shelter",
   "website": "https://petshelter.org",
   "email": "info@petshelter.org",
   "phone": "(555) 987-6543",
+  "theme": "friendly",
   "surveyQuestions": [
     "What type of pet are you interested in?",
     "How did you hear about our event?"
   ]
 }
 
-Example with unclear prompt:
-Prompt: "Something about food"
-Response:
+**Prompt**: "Campaign for a new tech startup"
+**Response**:
 {
-  "name": "Food Campaign",
-  "description": "TBD",
-  "category": "Unknown",
-  "businessName": "Unknown",
+  "title": "Tech Startup Launch",
+  "description": "Introducing our innovative tech solutions to the market.",
+  "category": "business",
+  "subcategory": "tech",
+  "businessName": "Tech Innovate",
+  "website": "https://techinnovate.com",
+  "email": "contact@techinnovate.com",
+  "phone": "(555) 123-4567",
+  "theme": "modern",
+  "surveyQuestions": [
+    "What do you think of our product?",
+    "How can we serve you better?"
+  ]
+}
+
+**Prompt**: "Something vague"
+**Response**:
+{
+  "title": "",
+  "description": "",
+  "category": "",
+  "subcategory": "",
+  "businessName": "",
   "website": "",
   "email": "",
   "phone": "",
+  "theme": "",
   "surveyQuestions": [
-    "What do you think of this campaign?",
-    "How can we improve it?"
+    ""
   ]
 }
 
@@ -68,16 +106,17 @@ Now, generate a JSON object based on the following prompt:
 
 // Default campaign data as a fallback
 const DEFAULT_CAMPAIGN_DATA = {
-  name: "Unknown Campaign",
-  description: "TBD",
-  category: "Unknown",
-  businessName: "Unknown",
+  title: "",
+  description: "",
+  category: "",
+  subcategory: "",
+  businessName: "",
   website: "",
   email: "",
   phone: "",
+  theme: "",
   surveyQuestions: [
-    "What do you think of this campaign?",
-    "How can we improve it?"
+    ""
   ]
 };
 
@@ -128,36 +167,33 @@ router.post('/generate-campaign', async (req, res) => {
     // Log the raw Gemini API response
     console.log('Gemini API Response:', response.data);
 
-    // Inside the try block after calling the Gemini API
+    // Extract and parse the generated text
     const generatedText = response.data.candidates[0].content.parts[0].text;
-
-    // Remove markdown code block indicators if present
     const jsonMatch = generatedText.match(/```json\s*([\s\S]*?)\s*```/);
     const jsonText = jsonMatch ? jsonMatch[1].trim() : generatedText.trim();
 
     try {
-    const parsedData = JSON.parse(jsonText);
-    campaignData = {
+      const parsedData = JSON.parse(jsonText);
+      campaignData = {
         ...DEFAULT_CAMPAIGN_DATA,
         ...parsedData,
         surveyQuestions: Array.isArray(parsedData.surveyQuestions) && parsedData.surveyQuestions.length > 0
-        ? parsedData.surveyQuestions
-        : DEFAULT_CAMPAIGN_DATA.surveyQuestions
-    };
+          ? parsedData.surveyQuestions
+          : DEFAULT_CAMPAIGN_DATA.surveyQuestions
+      };
     } catch (parseError) {
-    console.error('Failed to parse Gemini response as JSON:', jsonText);
-    responseStatus = 'error';
-    errorMessage = 'Invalid JSON from Gemini API';
+      console.error('Failed to parse Gemini response as JSON:', jsonText);
+      responseStatus = 'error';
+      errorMessage = 'Invalid JSON from Gemini API';
     }
   } catch (error) {
     console.error('Error calling Gemini API:', error.message);
     responseStatus = 'error';
     errorMessage = error.message || 'Failed to communicate with Gemini API';
-    // Use default data
   }
 
   // Ensure all required fields are present
-  const requiredFields = ['name', 'description', 'category', 'businessName', 'website', 'email', 'phone', 'surveyQuestions'];
+  const requiredFields = ['title', 'description', 'category', 'subcategory', 'businessName', 'website', 'email', 'phone', 'theme', 'surveyQuestions'];
   requiredFields.forEach((field) => {
     if (!campaignData.hasOwnProperty(field) || campaignData[field] === undefined || campaignData[field] === null) {
       campaignData[field] = DEFAULT_CAMPAIGN_DATA[field];

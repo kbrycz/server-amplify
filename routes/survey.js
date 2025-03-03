@@ -23,8 +23,8 @@ router.post('/upload', upload.single('video'), async (req, res) => {
 
   try {
     // Extract metadata from the request body
-    const { campaignId, firstName, lastName, email, score } = req.body;
-    console.log('Extracted Metadata:', { campaignId, firstName, lastName, email, score });
+    const { campaignId, firstName, lastName, email, zipCode } = req.body;
+    console.log('Extracted Metadata:', { campaignId, firstName, lastName, email, zipCode });
 
     // Validate required fields
     if (!campaignId) {
@@ -66,7 +66,7 @@ router.post('/upload', upload.single('video'), async (req, res) => {
       firstName: firstName || '',
       lastName: lastName || '',
       email: email || '',
-      score: score ? parseFloat(score) : null,
+      zipCode: zipCode || '',
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     console.log('Creating new surveyVideos document with data:', videoData);
