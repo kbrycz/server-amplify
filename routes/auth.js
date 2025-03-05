@@ -1,17 +1,43 @@
 const express = require('express');
-const admin = require('../firebase'); // Import the initialized Firebase instance
+const admin = require('../firebase');
 const { verifyToken } = require('../middleware');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const router = express.Router();
 
-// Create user profile after signup
+const planToPriceId = {
+  pro: 'price_1Qz1CmGf0OHXso0nSDHCPPG4',
+  premium: 'price_1Qz1FnGf0OHXso0nfdgvQH0r'
+};
+
+router.post('/update-plan', verifyToken, async (req, res) => {
+  const { plan } = req.body;
+  const userId = req.user.uid;
+
+  if (plan !== 'basic') {
+    return res.status(400).json({ error: 'This endpoint only supports updating to the basic plan' });
+  }
+
+  try {
+    const userRef = admin.firestore().collection('users').doc(userId);
+    await userRef.update({
+      plan: 'basic',
+      credits: 5
+    });
+    res.json({ success: true, plan: 'basic' });
+  } catch (error) {
+    console.error('Error updating plan:', error.message);
+    res.status(500).json({ error: 'Failed to update plan' });
+  }
+});
+
 router.post('/signup', verifyToken, async (req, res) => {
   console.log('Received signup request with body:', req.body);
   const { firstName, lastName } = req.body;
   const uid = req.user.uid;
   const email = req.user.email;
 
-  console.log('Creating profile for UID:', uid); // Debug UID
+  console.log('Creating profile for UID:', uid);
   if (!firstName || !lastName || !firstName.trim() || !lastName.trim()) {
     return res.status(400).send('First name and last name are required');
   }
@@ -25,8 +51,10 @@ router.post('/signup', verifyToken, async (req, res) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       preferences: {},
       campaigns: [],
-      credits: 10  // New field with initial 10 credits
+      plan: 'basic',
+      credits: 5
     });
+
     console.log('Firestore profile created successfully for UID:', uid);
     res.status(201).json({
       message: 'Profile created successfully',
@@ -34,18 +62,16 @@ router.post('/signup', verifyToken, async (req, res) => {
       email
     });
   } catch (error) {
-    console.error('Error creating Firestore profile:', error);
+    console.error('Error creating profile:', error);
     res.status(500).send(`Failed to create profile: ${error.message}`);
   }
 });
 
-// Fetch user profile
 router.get('/profile', verifyToken, async (req, res) => {
   const uid = req.user.uid;
-  console.log('Fetching profile for UID:', uid); // Debug UID
+  console.log('Fetching profile for UID:', uid);
   try {
     const userDoc = await admin.firestore().collection('users').doc(uid).get();
-    console.log('Document exists:', userDoc.exists); // Debug document existence
     if (!userDoc.exists) {
       return res.status(404).send('Profile not found');
     }
@@ -56,7 +82,6 @@ router.get('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// Existing routes
 router.get('/user', verifyToken, (req, res) => {
   res.json({ user: req.user });
 });

@@ -14,15 +14,23 @@ const videoEnhancerRoutes = require('./routes/video-enhancer');
 const thumbnailEndpoint = require('./routes/thumbnailEndpoint');
 const recentActivity = require('./routes/recentActivity');
 const alertsRoutes = require('./routes/alerts');
+const stripeRoutes = require('./routes/stripe');
 
 const app = express();
-app.use(express.json());
-app.use(cors({
-    origin: '*', // In production, restrict to your domain
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+
+// Global CORS configuration
+const corsOptions = {
+    origin: '*', // In production, use your frontend domain (e.g., 'https://yourdomain.com')
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
-}));
+};
+
+app.use(cors(corsOptions));
+app.use(express.json());
+
+// Mount stripe routes with explicit CORS
+app.use('/stripe', cors(corsOptions), stripeRoutes);
 
 // Mount the routes
 app.use('/campaign', campaignRoutes);
@@ -38,6 +46,7 @@ app.use('/videoEnhancer', videoEnhancerRoutes);
 app.use('/thumbnailEndpoint', thumbnailEndpoint);
 app.use('/activity', recentActivity);
 app.use('/alerts', alertsRoutes);
+
 
 
 app.get('/', (req, res) => {
