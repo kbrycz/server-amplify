@@ -1,6 +1,6 @@
 const express = require('express');
-const admin = require('../firebase');
-const { verifyToken } = require('../middleware');
+const admin = require('../../config/firebase');
+const { verifyToken } = require('../../config/middleware');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const router = express.Router();

@@ -1,14 +1,14 @@
 const express = require('express');
 const multer = require('multer');
-const admin = require('../firebase');
-const { verifyToken } = require('../middleware');
+const admin = require('../../config/firebase');
+const { verifyToken } = require('../../config/middleware');
 const axios = require('axios');
-const { logActivity } = require('../activityLogger');
+const { logActivity } = require('../../utils/activityLogger');
 
 const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 500 * 1024 * 1024 } // 500MB max; adjust if needed
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB max; adjust as needed
 });
 
 const db = admin.firestore();
@@ -62,15 +62,15 @@ async function createAlert(userId, alertType, message, extraData = {}) {
       alertType,
       message,
       extraData,
-      read: false, // Set read to false by default
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      read: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   } catch (err) {
     console.error('Error creating alert:', err);
   }
 }
 
-// POST /videoEnhancer/upload
+// **POST /videoEnhancer/upload**
 // Uploads a raw video and initiates processing with Shotstack
 router.post('/upload', verifyToken, upload.single('video'), async (req, res) => {
   if (!req.file) {
@@ -79,15 +79,9 @@ router.post('/upload', verifyToken, upload.single('video'), async (req, res) => 
   }
 
   const userId = req.user.uid;
-  const {
-    desiredLength,
-    transitionEffect,
-    captionText,
-    backgroundMusic,
-    outputResolution
-  } = req.body;
+  const { desiredLength, transitionEffect, captionText, backgroundMusic, outputResolution } = req.body;
 
-  let videoId; // Define videoId for use in catch block
+  let videoId;
   try {
     // Check user's credits
     const userRef = db.collection('users').doc(userId);
@@ -109,9 +103,9 @@ router.post('/upload', verifyToken, upload.single('video'), async (req, res) => 
       title: req.body.title || 'Untitled Video',
       description: req.body.description || '',
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      status: 'pending', // Add status field to track processing
-      renderId: null, // Will store Shotstack render ID
-      processedVideoUrl: null // Will store the final processed URL
+      status: 'pending',
+      renderId: null,
+      processedVideoUrl: null,
     };
     const docRef = await db.collection('enhancerVideos').add(videoData);
     videoId = docRef.id;
@@ -133,7 +127,7 @@ router.post('/upload', verifyToken, upload.single('video'), async (req, res) => 
     await docRef.update({ videoUrl });
     console.log('Raw video uploaded to GCS:', videoUrl);
 
-    // Log activity: video uploaded
+    // Log activity
     await logActivity(userId, 'video_enhancer_uploaded', `Uploaded video for enhancement: ${videoData.title}`, { videoId });
 
     // Generate signed URL for Shotstack
@@ -143,17 +137,17 @@ router.post('/upload', verifyToken, upload.single('video'), async (req, res) => 
     const videoDuration = await getVideoDuration(signedUrl);
     console.log('Video duration (seconds):', videoDuration);
 
-    // Define the clip length for Shotstack
+    // Define clip length
     const clipLength = Math.min(videoDuration, Number(desiredLength) || 60);
     console.log('Using clip length (seconds):', clipLength);
 
-    // Determine audio source, replacing the problematic Shotstack URL
+    // Determine audio source
     let audioSrc = backgroundMusic;
     if (!audioSrc || audioSrc === 'https://shotstack-assets.s3.ap-southeast-2.amazonaws.com/music/freepd/effects.mp3') {
-      audioSrc = 'https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/motions.mp3';
+      audioSrc = 'https://shotstack-assets.s3.ap-southeast-2.amazonaws.com/music/freepd/motions.mp3';
     }
 
-    // Shotstack template with user-specified parameters
+    // Shotstack template
     const shotstackTemplate = {
       timeline: {
         tracks: [
@@ -170,10 +164,7 @@ router.post('/upload', verifyToken, upload.single('video'), async (req, res) => 
           {
             clips: [
               {
-                asset: {
-                  type: 'audio',
-                  src: audioSrc,
-                },
+                asset: { type: 'audio', src: audioSrc },
                 start: 0,
                 length: clipLength,
               },
@@ -225,56 +216,48 @@ router.post('/upload', verifyToken, upload.single('video'), async (req, res) => 
       }
     );
 
-    console.log('Shotstack API Response:', JSON.stringify(shotstackResponse.data, null, 2));
     if (!shotstackResponse.data.success) {
-      console.log('Shotstack API failed:', shotstackResponse.data.message);
       throw new Error(`Shotstack API failed to initiate render: ${shotstackResponse.data.message}`);
     }
 
     const renderId = shotstackResponse.data.response.id;
     console.log('Shotstack render initiated, renderId:', renderId);
 
-    // Update the enhancerVideos document with the renderId and status
+    // Update document with renderId
     await docRef.update({
       renderId,
       status: 'processing',
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // Respond immediately with the videoId so the front-end can poll for status
+    // Respond immediately
     res.status(202).json({
       message: 'Video upload successful, processing initiated',
       videoId,
-      renderId
+      renderId,
     });
 
-    // Process the video in the background
+    // Background processing
     (async () => {
       try {
-        // Poll for render completion (5 seconds interval, up to 5 minutes)
         let renderStatus;
         let processedVideoUrl;
         let pollAttempts = 0;
-        const maxAttempts = 60; // 5 minutes (60 * 5 seconds)
+        const maxAttempts = 60;
 
         do {
           await new Promise((resolve) => setTimeout(resolve, 5000));
           pollAttempts++;
           console.log(`Polling Shotstack render status, attempt ${pollAttempts}/${maxAttempts}`);
-          const statusResponse = await axios.get(
-            `${SHOTSTACK_STATUS_URL}${renderId}`,
-            {
-              headers: { 'x-api-key': SHOTSTACK_API_KEY },
-            }
-          );
-          console.log('Shotstack render status response:', JSON.stringify(statusResponse.data, null, 2));
+          const statusResponse = await axios.get(`${SHOTSTACK_STATUS_URL}${renderId}`, {
+            headers: { 'x-api-key': SHOTSTACK_API_KEY },
+          });
           renderStatus = statusResponse.data.response.status;
           if (renderStatus === 'done') {
             processedVideoUrl = statusResponse.data.response.url;
           } else if (renderStatus === 'failed') {
             throw new Error(`Shotstack render failed: ${statusResponse.data.response.error || 'Unknown error'}`);
           }
-          console.log('Shotstack render status:', renderStatus);
           if (pollAttempts >= maxAttempts) {
             throw new Error('Shotstack render timed out after maximum attempts');
           }
@@ -282,81 +265,64 @@ router.post('/upload', verifyToken, upload.single('video'), async (req, res) => 
 
         console.log('Processed video URL from Shotstack:', processedVideoUrl);
 
-        // Download the video from Shotstack
+        // Download and upload video
         const videoResponse = await axios.get(processedVideoUrl, { responseType: 'arraybuffer' });
         const videoBuffer = Buffer.from(videoResponse.data);
 
-        // Upload the video to Google Cloud Storage in a 'processed' folder
-        const bucket = storage.bucket();
         const processedFileName = `enhancerVideos/processed/${userId}/${renderId}.mp4`;
         const processedFile = bucket.file(processedFileName);
         await processedFile.save(videoBuffer, {
-          metadata: {
-            contentType: 'video/mp4',
-          },
+          metadata: { contentType: 'video/mp4' },
         });
 
         const permanentUrl = `gs://${bucket.name}/${processedFileName}`;
         console.log('Processed video uploaded to GCS:', permanentUrl);
 
-        // Update the enhancerVideos document with the processed URL and status
+        // Update document
         await docRef.update({
           processedVideoUrl: permanentUrl,
           status: 'completed',
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
-        // Deduct one credit only on successful processing
+        // Deduct credit
         await userRef.update({
-          credits: admin.firestore.FieldValue.increment(-1)
+          credits: admin.firestore.FieldValue.increment(-1),
         });
 
-        // Log activity and create success alert
+        // Log and alert
         await logActivity(userId, 'video_enhancer_processed', `Processed video: ${videoData.title}`, { videoId, renderId });
         await createAlert(userId, 'enhancement_success', 'Your video has been enhanced successfully.', {
           videoId,
           renderId,
           processedVideoUrl: permanentUrl,
         });
-
       } catch (error) {
         console.error('Background processing error:', error.message);
-        // Update the enhancerVideos document with failure status
         await docRef.update({
           status: 'failed',
           error: error.message,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        // Create a failure alert
         await createAlert(userId, 'enhancement_failure', `Video enhancement failed: ${error.message}`, { videoId, renderId });
       }
     })();
-
   } catch (error) {
     console.error('Error in upload endpoint:', error.message);
     if (videoId) {
-      // Update the enhancerVideos document with failure status if it was created
-      try {
-        await db.collection('enhancerVideos').doc(videoId).update({
-          status: 'failed',
-          error: error.message,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-      } catch (updateErr) {
-        console.error('Error updating enhancerVideos status:', updateErr.message);
-      }
+      await db.collection('enhancerVideos').doc(videoId).update({
+        status: 'failed',
+        error: error.message,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     }
-    await createAlert(
-      userId,
-      'enhancement_failure',
-      `Video enhancement failed: ${error.message}`,
-      videoId ? { videoId } : {}
-    );
+    await createAlert(userId, 'enhancement_failure', `Video enhancement failed: ${error.message}`, videoId ? { videoId } : {});
     res.status(500).json({ error: 'Failed to initiate video processing', message: error.message });
   }
 });
 
-// DELETE /videoEnhancer/:videoId
+// **DELETE /videoEnhancer/:videoId**
+// Deletes a video and its associated files
 router.delete('/:videoId', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
@@ -376,6 +342,7 @@ router.delete('/:videoId', verifyToken, async (req, res) => {
     const bucket = storage.bucket();
     const gsPrefix = `gs://${bucket.name}/`;
 
+    // Delete raw video
     if (videoData.videoUrl && videoData.videoUrl.startsWith(gsPrefix)) {
       const filePath = videoData.videoUrl.substring(gsPrefix.length);
       const file = bucket.file(filePath);
@@ -387,6 +354,7 @@ router.delete('/:videoId', verifyToken, async (req, res) => {
       }
     }
 
+    // Delete processed video
     if (videoData.processedVideoUrl && videoData.processedVideoUrl.startsWith(gsPrefix)) {
       const filePath = videoData.processedVideoUrl.substring(gsPrefix.length);
       const file = bucket.file(filePath);
@@ -398,6 +366,7 @@ router.delete('/:videoId', verifyToken, async (req, res) => {
       }
     }
 
+    // Delete Firestore document
     await docRef.delete();
     console.log('Deleted enhancerVideos document:', videoId);
 
@@ -411,8 +380,8 @@ router.delete('/:videoId', verifyToken, async (req, res) => {
   }
 });
 
-// GET /videoEnhancer
-// Retrieve all processed videos for the user (most recent first)
+// **GET /videoEnhancer**
+// Retrieve all enhanced videos for the user
 router.get('/', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
@@ -421,7 +390,7 @@ router.get('/', verifyToken, async (req, res) => {
       .where('userId', '==', userId)
       .orderBy('createdAt', 'desc')
       .get();
-    const videos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const videos = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     console.log(`Found ${videos.length} enhancerVideos`);
     res.status(200).json(videos);
   } catch (error) {
@@ -430,7 +399,7 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// GET /videoEnhancer/status/:videoId
+// **GET /videoEnhancer/status/:videoId**
 // Check the status of a video enhancement job
 router.get('/status/:videoId', verifyToken, async (req, res) => {
   const { videoId } = req.params;
@@ -438,7 +407,6 @@ router.get('/status/:videoId', verifyToken, async (req, res) => {
   console.log('Checking enhancement status for videoId:', videoId);
 
   try {
-    // Check if the video exists and belongs to the user
     const videoRef = db.collection('enhancerVideos').doc(videoId);
     const videoDoc = await videoRef.get();
 
@@ -453,7 +421,6 @@ router.get('/status/:videoId', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'You do not own this video' });
     }
 
-    // Check the current status
     const status = videoData.status || 'pending';
 
     if (status === 'completed') {
@@ -463,13 +430,12 @@ router.get('/status/:videoId', verifyToken, async (req, res) => {
       return res.status(200).json({
         status: 'completed',
         videoId,
-        processedVideoUrl: signedUrl || videoData.processedVideoUrl
+        processedVideoUrl: signedUrl || videoData.processedVideoUrl,
       });
     }
 
     if (status === 'failed') {
       console.log('Video processing failed for videoId:', videoId);
-      // Check for failure alerts
       const failureAlertSnapshot = await db.collection('alerts')
         .where('userId', '==', userId)
         .where('alertType', '==', 'enhancement_failure')
@@ -483,38 +449,32 @@ router.get('/status/:videoId', verifyToken, async (req, res) => {
         : failureAlertSnapshot.docs[0].data().message || 'Processing failed';
       return res.status(200).json({
         status: 'failed',
-        error: errorMessage
+        error: errorMessage,
       });
     }
 
-    // If status is 'processing', estimate progress
     if (status === 'processing') {
       const lastUpdated = videoData.updatedAt ? videoData.updatedAt.toDate() : new Date();
       const now = new Date();
       const elapsedMs = now - lastUpdated;
-      const estimatedTotalMs = 2 * 60 * 1000; // 2 minutes in milliseconds
-
+      const estimatedTotalMs = 2 * 60 * 1000;
       const progress = Math.min(elapsedMs / estimatedTotalMs, 0.99);
       console.log('Estimated progress for videoId:', videoId, progress);
       return res.status(200).json({
         status: 'processing',
         progress: progress,
-        estimatedTimeRemaining: Math.max(0, estimatedTotalMs - elapsedMs)
+        estimatedTimeRemaining: Math.max(0, estimatedTotalMs - elapsedMs),
       });
     }
 
-    // Default to pending if status is unknown
     console.log('Video is in pending state for videoId:', videoId);
-    return res.status(200).json({
-      status: 'pending'
-    });
-
+    return res.status(200).json({ status: 'pending' });
   } catch (error) {
     console.error('Error checking video enhancement status:', error.message);
     res.status(500).json({
       status: 'unknown',
       error: 'Failed to check enhancement status',
-      message: error.message
+      message: error.message,
     });
   }
 });

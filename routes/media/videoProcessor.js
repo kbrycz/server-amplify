@@ -1,6 +1,6 @@
 const express = require('express');
-const admin = require('../firebase');
-const { verifyToken } = require('../middleware');
+const admin = require('../../config/firebase');
+const { verifyToken } = require('../../config/middleware');
 const axios = require('axios');
 const router = express.Router();
 

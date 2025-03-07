@@ -1,7 +1,7 @@
 // alerts.js
 const express = require('express');
-const admin = require('../firebase'); // Your Firebase Admin instance
-const { verifyToken } = require('../middleware'); // Your token verification middleware
+const admin = require('../../config/firebase'); // Your Firebase Admin instance
+const { verifyToken } = require('../../config/middleware'); // Your token verification middleware
 
 const router = express.Router();
 const db = admin.firestore();

@@ -1,29 +1,31 @@
 const express = require('express');
 const cors = require('cors');
-const admin = require('./firebase'); // Import the initialized Firebase instance
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/user');
-const campaignRoutes = require('./routes/campaign');
-const campaignAIRoutes = require('./routes/campaign-ai');
-const surveyRoutes = require('./routes/survey');
-const draftCampaignRoutes = require('./routes/draftCampaign');
-const videoEditorRoutes = require('./routes/videoEditor');
-const videoProcessorRoutes = require('./routes/videoProcessor');
-const representativesRoutes = require('./routes/representatives'); // Add this line
-const videoEnhancerRoutes = require('./routes/video-enhancer');
-const thumbnailEndpoint = require('./routes/thumbnailEndpoint');
-const recentActivity = require('./routes/recentActivity');
-const alertsRoutes = require('./routes/alerts');
-const stripeRoutes = require('./routes/stripe');
+const admin = require('./config/firebase'); // Import the initialized Firebase instance
+
+// Updated imports based on the new folder structure
+const authRoutes = require('./routes/auth/auth');
+const userRoutes = require('./routes/user/user');
+const campaignRoutes = require('./routes/campaigns/campaign');
+const campaignAIRoutes = require('./routes/campaigns/campaignAI');
+const draftCampaignRoutes = require('./routes/campaigns/draftCampaign');
+const representativesRoutes = require('./routes/civic/representatives');
+const surveyRoutes = require('./routes/media/survey');
+const videoEditorRoutes = require('./routes/media/videoEditor');
+const videoProcessorRoutes = require('./routes/media/videoProcessor');
+const videoEnhancerRoutes = require('./routes/media/videoEnhancer');
+const thumbnailEndpoint = require('./routes/media/thumbnailEndpoint');
+const recentActivity = require('./routes/activity/recentActivity');
+const alertsRoutes = require('./routes/activity/alerts');
+const stripeRoutes = require('./routes/stripe/stripe');
 
 const app = express();
 
 // Global CORS configuration
 const corsOptions = {
-    origin: '*', // In production, use your frontend domain (e.g., 'https://yourdomain.com')
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true
+  origin: '*', // In production, use your frontend domain (e.g., 'https://yourdomain.com')
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 };
 
 app.use(cors(corsOptions));
@@ -35,19 +37,17 @@ app.use('/stripe', cors(corsOptions), stripeRoutes);
 // Mount the routes
 app.use('/campaign', campaignRoutes);
 app.use('/campaign', campaignAIRoutes);
+app.use('/draftCampaign', draftCampaignRoutes);
 app.use('/auth', authRoutes);
 app.use('/user', userRoutes);
 app.use('/survey', surveyRoutes);
-app.use('/draftCampaign', draftCampaignRoutes);
 app.use('/videoEditor', videoEditorRoutes);
 app.use('/videoProcessor', videoProcessorRoutes);
-app.use('/representatives', representativesRoutes); // Add this line
+app.use('/representatives', representativesRoutes);
 app.use('/videoEnhancer', videoEnhancerRoutes);
 app.use('/thumbnailEndpoint', thumbnailEndpoint);
 app.use('/activity', recentActivity);
 app.use('/alerts', alertsRoutes);
-
-
 
 app.get('/', (req, res) => {
   res.send('Welcome to the API');

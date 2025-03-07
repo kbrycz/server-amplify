@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
-const admin = require('../firebase');
-const { verifyToken } = require('../middleware');
+const admin = require('../../config/firebase');
+const { verifyToken } = require('../../config/middleware');
 
 const router = express.Router();
 

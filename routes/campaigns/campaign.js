@@ -1,8 +1,8 @@
 // campaign.js
 const express = require('express');
-const admin = require('../firebase'); // Import the initialized Firebase instance
-const { verifyToken } = require('../middleware'); // Import your middleware
-const { logActivity } = require('../activityLogger'); // Import the activity logger
+const admin = require('../../config/firebase'); // Import the initialized Firebase instance
+const { verifyToken } = require('../../config/middleware'); // Import your middleware
+const { logActivity } = require('../../utils/activityLogger'); // Import the activity logger
 const router = express.Router();
 
 // Initialize Firebase Admin SDK (only if not already initialized elsewhere)

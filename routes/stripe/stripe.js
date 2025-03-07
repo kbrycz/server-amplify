@@ -1,8 +1,8 @@
 // stripe.js
 const express = require('express');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const admin = require('../firebase'); // Adjust path to your Firebase config
-const { verifyToken } = require('../middleware'); // Adjust path to your middleware
+const admin = require('../../config/firebase'); // Adjust path to your Firebase config
+const { verifyToken } = require('../../config/middleware'); // Adjust path to your middleware
 const router = express.Router();
 const db = admin.firestore();
 
@@ -161,5 +161,69 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   // Acknowledge receipt of the event
   res.json({ received: true });
 });
+
+// routes/stripe.js
+router.post('/downgrade', verifyToken, async (req, res) => {
+    const userId = req.user.uid;
+    const { targetPlan } = req.body; // Expected targetPlan: "pro" or "basic"
+  
+    // Define a ranking for the plans
+    const planRank = { basic: 1, pro: 2, premium: 3 };
+    // Define credits for each plan
+    const planCredits = { basic: 5, pro: 100, premium: 250 };
+  
+    if (!targetPlan || !planRank[targetPlan]) {
+      return res.status(400).json({ error: 'Invalid target plan specified' });
+    }
+  
+    try {
+      // Get the user's Firestore document
+      const userRef = admin.firestore().collection('users').doc(userId);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      const userData = userDoc.data();
+      const currentPlan = userData.plan || 'basic';
+      const currentRank = planRank[currentPlan];
+      const targetRank = planRank[targetPlan];
+  
+      // Check if downgrade is valid (target must be lower than current)
+      if (currentRank <= targetRank) {
+        return res.status(400).json({ error: 'Downgrade target must be lower than current plan' });
+      }
+      
+      // Ensure the user has an active subscription to cancel
+      const subscriptionId = userData.stripeSubscriptionId;
+      if (!subscriptionId) {
+        return res.status(400).json({ error: 'No active subscription found for downgrade' });
+      }
+      
+      // Cancel the existing Stripe subscription using the cancel method
+      await stripe.subscriptions.cancel(subscriptionId);
+      
+      // Update Firestore to set the user to the target plan with appropriate credits
+      await userRef.update({
+        plan: targetPlan,
+        credits: planCredits[targetPlan],
+        stripeSubscriptionId: null,
+        stripeCustomerId: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      res.json({ 
+        success: true, 
+        plan: targetPlan, 
+        message: `Subscription downgraded to ${targetPlan} plan successfully` 
+      });
+    } catch (error) {
+      console.error('Error downgrading subscription:', error.message);
+      res.status(500).json({ error: 'Failed to downgrade subscription', details: error.message });
+    }
+  });
+  
+  module.exports = router;
+  
+  module.exports = router;
 
 module.exports = router;

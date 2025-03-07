@@ -1,6 +1,6 @@
 const express = require('express');
-const admin = require('../firebase'); // Import the initialized Firebase instance
-const { verifyToken } = require('../middleware'); // Import your middleware
+const admin = require('../../config/firebase'); // Import the initialized Firebase instance
+const { verifyToken } = require('../../config/middleware'); // Import your middleware
 const router = express.Router();
 
 // Initialize Firebase Admin SDK (only if not already initialized elsewhere)

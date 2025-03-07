@@ -1,5 +1,5 @@
 // activityLogger.js
-const admin = require('./firebase');
+const admin = require('../config/firebase');
 const db = admin.firestore();
 
 /**

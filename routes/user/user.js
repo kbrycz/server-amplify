@@ -1,6 +1,6 @@
 const express = require('express');
-const admin = require('../firebase'); // Import the initialized Firebase instance
-const { verifyToken } = require('../middleware');
+const admin = require('../../config/firebase'); // Import the initialized Firebase instance
+const { verifyToken } = require('../../config/middleware');
 
 const router = express.Router();
 

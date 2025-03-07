@@ -1,7 +1,7 @@
 // recentActivity.js
 const express = require('express');
-const admin = require('../firebase');
-const { verifyToken } = require('../middleware');
+const admin = require('../../config/firebase');
+const { verifyToken } = require('../../config/middleware');
 const router = express.Router();
 
 const db = admin.firestore();
