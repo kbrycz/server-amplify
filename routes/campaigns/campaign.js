@@ -1,11 +1,40 @@
-// campaign.js
+/**
+ * Campaign API
+ *
+ * This module provides endpoints for managing campaigns for authenticated users.
+ *
+ * Endpoints:
+ *   POST   /campaigns
+ *     - Create a new campaign.
+ *   GET    /campaigns
+ *     - Retrieve all campaigns for the authenticated user.
+ *   GET    /campaigns/recent
+ *     - Retrieve up to 3 most recent campaigns.
+ *   GET    /campaigns/count
+ *     - Retrieve the total count of campaigns for the authenticated user.
+ *   GET    /campaigns/:id
+ *     - Retrieve a specific campaign by its ID (account-specific).
+ *   PUT    /campaigns/:id
+ *     - Update a specific campaign (account-specific).
+ *   DELETE /campaigns/:id
+ *     - Delete a specific campaign (account-specific).
+ *   GET    /campaigns/survey/:id
+ *     - Retrieve survey data for a campaign (public endpoint).
+ *
+ * @example
+ *   // Create a campaign:
+ *   curl -X POST -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" \
+ *        -d '{"name": "New Campaign", ...}' https://yourdomain.com/campaign/campaigns
+ */
+
 const express = require('express');
-const admin = require('../../config/firebase'); // Import the initialized Firebase instance
-const { verifyToken } = require('../../config/middleware'); // Import your middleware
-const { logActivity } = require('../../utils/activityLogger'); // Import the activity logger
+const admin = require('../../config/firebase');
+const { verifyToken } = require('../../config/middleware');
+const { logActivity } = require('../../utils/activityLogger');
+
 const router = express.Router();
 
-// Initialize Firebase Admin SDK (only if not already initialized elsewhere)
+// Ensure Firebase is initialized (if not already done in firebase.js)
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
@@ -14,16 +43,23 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-// Helper function to get counts for a campaign
+/**
+ * Helper function to get campaign counts.
+ * Returns the count of AI videos (using creatomateJobs with status "succeeded")
+ * and survey responses associated with a campaign.
+ *
+ * @param {string} campaignId - The campaign ID.
+ * @returns {Promise<{aiVideoCount: number, responsesCount: number}>}
+ */
 async function getCampaignCounts(campaignId) {
   try {
-    // Count AI videos for the campaign
-    const aiVideosSnapshot = await db.collection('aiVideos')
+    // Use creatomateJobs collection to count succeeded AI videos
+    const aiJobsSnapshot = await db.collection('creatomateJobs')
       .where('campaignId', '==', campaignId)
+      .where('status', '==', 'succeeded')
       .get();
-    const aiVideoCount = aiVideosSnapshot.size;
+    const aiVideoCount = aiJobsSnapshot.size;
 
-    // Count survey responses (surveyVideos) for the campaign
     const surveyVideosSnapshot = await db.collection('surveyVideos')
       .where('campaignId', '==', campaignId)
       .get();
@@ -31,41 +67,54 @@ async function getCampaignCounts(campaignId) {
 
     return { aiVideoCount, responsesCount };
   } catch (error) {
-    console.error(`Error fetching counts for campaign ${campaignId}:`, error);
-    return { aiVideoCount: 0, responsesCount: 0 }; // Return 0s if counts fail
+    console.error(`[ERROR] Failed to get counts for campaign ${campaignId}:`, error);
+    return { aiVideoCount: 0, responsesCount: 0 };
   }
 }
 
-// Create a new campaign (account-specific)
+/**
+ * POST /campaigns
+ * Create a new campaign associated with the authenticated user.
+ *
+ * @example
+ *   curl -X POST -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" \
+ *        -d '{ "name": "Campaign Name", "otherField": "value" }' https://yourdomain.com/campaign/campaigns
+ */
 router.post('/campaigns', verifyToken, async (req, res) => {
   try {
-    const userId = req.user.uid; // Get UID from verified token
-    console.log(`Received request to create a campaign for user: ${userId}`);
+    const userId = req.user.uid;
+    console.info(`[INFO] Creating new campaign for user: ${userId}`);
     const campaignData = {
       ...req.body,
-      userId, // Associate campaign with the user
+      userId,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       dateModified: admin.firestore.FieldValue.serverTimestamp(),
     };
     const campaignRef = await db.collection('campaigns').add(campaignData);
     const createdDoc = await campaignRef.get();
     const createdCampaign = { id: createdDoc.id, ...createdDoc.data() };
-    console.log(`Campaign created successfully with ID: ${createdDoc.id} for user: ${userId}`);
+    console.info(`[INFO] Campaign created with ID: ${createdDoc.id} for user: ${userId}`);
     await logActivity(userId, 'campaign_created', `Created campaign: ${createdCampaign.name || 'Untitled'}`, { campaignId: createdDoc.id });
-    // Add counts to the response (new campaign will have 0 initially)
+    // New campaigns have zero counts initially.
     const counts = { aiVideoCount: 0, responsesCount: 0 };
-    res.status(201).json({ ...createdCampaign, ...counts });
+    return res.status(201).json({ ...createdCampaign, ...counts });
   } catch (error) {
-    console.error(`Error creating campaign for user: ${userId}`, error);
-    res.status(500).json({ error: 'Failed to create campaign', message: error.message });
+    console.error(`[ERROR] Error creating campaign for user ${req.user.uid}:`, error);
+    return res.status(500).json({ error: 'Failed to create campaign', message: error.message });
   }
 });
 
-// Read all campaigns for the authenticated user, sorted by most recent (dateModified descending)
+/**
+ * GET /campaigns
+ * Retrieve all campaigns for the authenticated user, sorted by last modified date (descending).
+ *
+ * @example
+ *   curl -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/campaign/campaigns
+ */
 router.get('/campaigns', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
-    console.log(`Received request to get all campaigns for user: ${userId}`);
+    console.info(`[INFO] Retrieving all campaigns for user: ${userId}`);
     const snapshot = await db.collection('campaigns')
       .where('userId', '==', userId)
       .orderBy('dateModified', 'desc')
@@ -75,19 +124,25 @@ router.get('/campaigns', verifyToken, async (req, res) => {
       const counts = await getCampaignCounts(doc.id);
       return { ...campaignData, ...counts };
     }));
-    console.log(`Retrieved ${campaigns.length} campaigns for user: ${userId}`);
-    res.status(200).json(campaigns);
+    console.info(`[INFO] Retrieved ${campaigns.length} campaigns for user: ${userId}`);
+    return res.status(200).json(campaigns);
   } catch (error) {
-    console.error(`Error retrieving campaigns for user: ${userId}`, error);
-    res.status(500).json({ error: 'Failed to retrieve campaigns', message: error.message });
+    console.error(`[ERROR] Error retrieving campaigns for user ${req.user.uid}:`, error);
+    return res.status(500).json({ error: 'Failed to retrieve campaigns', message: error.message });
   }
 });
 
-// UPDATED ENDPOINT: Read the most recent campaigns (up to 3) for the authenticated user
+/**
+ * GET /campaigns/recent
+ * Retrieve up to 3 most recent campaigns for the authenticated user.
+ *
+ * @example
+ *   curl -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/campaign/campaigns/recent
+ */
 router.get('/campaigns/recent', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
-    console.log(`Received request to get recent campaigns for user: ${userId}`);
+    console.info(`[INFO] Retrieving recent campaigns for user: ${userId}`);
     const snapshot = await db.collection('campaigns')
       .where('userId', '==', userId)
       .orderBy('dateModified', 'desc')
@@ -98,73 +153,91 @@ router.get('/campaigns/recent', verifyToken, async (req, res) => {
       const counts = await getCampaignCounts(doc.id);
       return { ...campaignData, ...counts };
     }));
-    console.log(`Found ${campaigns.length} recent campaigns for user: ${userId}`);
-    res.status(200).json(campaigns);
+    console.info(`[INFO] Found ${campaigns.length} recent campaigns for user: ${userId}`);
+    return res.status(200).json(campaigns);
   } catch (error) {
-    console.error(`Error retrieving recent campaigns for user: ${userId}`, error);
-    res.status(500).json({ error: 'Failed to retrieve recent campaigns', message: error.message });
+    console.error(`[ERROR] Error retrieving recent campaigns for user ${req.user.uid}:`, error);
+    return res.status(500).json({ error: 'Failed to retrieve recent campaigns', message: error.message });
   }
 });
 
-// Count campaigns for the authenticated user
+/**
+ * GET /campaigns/count
+ * Count the total number of campaigns for the authenticated user.
+ *
+ * @example
+ *   curl -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/campaign/campaigns/count
+ */
 router.get('/campaigns/count', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
-    console.log(`Received request to count campaigns for user: ${userId}`);
+    console.info(`[INFO] Counting campaigns for user: ${userId}`);
     const snapshot = await db.collection('campaigns')
       .where('userId', '==', userId)
       .get();
     const count = snapshot.size;
-    console.log(`Campaign count for user ${userId}: ${count}`);
-    res.status(200).json({ count });
+    console.info(`[INFO] User ${userId} has ${count} campaigns`);
+    return res.status(200).json({ count });
   } catch (error) {
-    console.error(`Error counting campaigns for user: ${userId}`, error);
-    res.status(500).json({ error: 'Failed to count campaigns', message: error.message });
+    console.error(`[ERROR] Error counting campaigns for user ${req.user.uid}:`, error);
+    return res.status(500).json({ error: 'Failed to count campaigns', message: error.message });
   }
 });
 
-// Read a specific campaign by ID (account-specific)
+/**
+ * GET /campaigns/:id
+ * Retrieve a specific campaign by its ID. Only the owner can access this campaign.
+ *
+ * @example
+ *   curl -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/campaign/campaigns/abc123
+ */
 router.get('/campaigns/:id', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     const campaignId = req.params.id;
-    console.log(`Received request to get campaign ${campaignId} for user: ${userId}`);
+    console.info(`[INFO] Retrieving campaign ${campaignId} for user: ${userId}`);
     const campaignRef = db.collection('campaigns').doc(campaignId);
     const doc = await campaignRef.get();
     if (!doc.exists) {
-      console.log(`Campaign ${campaignId} not found for user: ${userId}`);
+      console.warn(`[WARN] Campaign ${campaignId} not found for user: ${userId}`);
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const campaignData = doc.data();
     if (campaignData.userId !== userId) {
-      console.log(`User ${userId} does not own campaign ${campaignId}`);
+      console.warn(`[WARN] User ${userId} is not authorized to access campaign ${campaignId}`);
       return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
     }
     const counts = await getCampaignCounts(campaignId);
-    const campaignWithCounts = { id: doc.id, ...campaignData, ...counts };
-    console.log(`Successfully retrieved campaign ${campaignId} for user: ${userId}`);
-    res.status(200).json(campaignWithCounts);
+    console.info(`[INFO] Successfully retrieved campaign ${campaignId} for user: ${userId}`);
+    return res.status(200).json({ id: doc.id, ...campaignData, ...counts });
   } catch (error) {
-    console.error(`Error retrieving campaign ${req.params.id} for user: ${req.user.uid}`, error);
-    res.status(500).json({ error: 'Failed to retrieve campaign', message: error.message });
+    console.error(`[ERROR] Error retrieving campaign ${req.params.id} for user ${req.user.uid}:`, error);
+    return res.status(500).json({ error: 'Failed to retrieve campaign', message: error.message });
   }
 });
 
-// Update a campaign by ID (account-specific)
+/**
+ * PUT /campaigns/:id
+ * Update a specific campaign. Only the owner can update their campaign.
+ *
+ * @example
+ *   curl -X PUT -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" \
+ *        -d '{"name": "Updated Campaign Name"}' https://yourdomain.com/campaign/campaigns/abc123
+ */
 router.put('/campaigns/:id', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     const campaignId = req.params.id;
-    console.log(`Received request to update campaign ${campaignId} for user: ${userId}`);
+    console.info(`[INFO] Updating campaign ${campaignId} for user: ${userId}`);
     const campaignRef = db.collection('campaigns').doc(campaignId);
     const doc = await campaignRef.get();
     if (!doc.exists) {
-      console.log(`Campaign ${campaignId} not found for user: ${userId}`);
+      console.warn(`[WARN] Campaign ${campaignId} not found for user: ${userId}`);
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const campaignData = doc.data();
     if (campaignData.userId !== userId) {
-      console.log(`User ${userId} does not own campaign ${campaignId}`);
+      console.warn(`[WARN] User ${userId} is not authorized to update campaign ${campaignId}`);
       return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
     }
     await campaignRef.update({
@@ -174,60 +247,73 @@ router.put('/campaigns/:id', verifyToken, async (req, res) => {
     const updatedDoc = await campaignRef.get();
     const updatedCampaign = { id: updatedDoc.id, ...updatedDoc.data() };
     const counts = await getCampaignCounts(campaignId);
-    console.log(`Campaign ${campaignId} updated successfully for user: ${userId}`);
-    await logActivity(userId, 'campaign_edited', `Edited campaign: ${updatedCampaign.name || 'Untitled'}`, { campaignId: campaignId });
-    res.status(200).json({ ...updatedCampaign, ...counts });
+    console.info(`[INFO] Campaign ${campaignId} updated successfully for user: ${userId}`);
+    await logActivity(userId, 'campaign_edited', `Edited campaign: ${updatedCampaign.name || 'Untitled'}`, { campaignId });
+    return res.status(200).json({ ...updatedCampaign, ...counts });
   } catch (error) {
-    console.error(`Error updating campaign ${req.params.id} for user: ${req.user.uid}`, error);
-    res.status(500).json({ error: 'Failed to update campaign', message: error.message });
+    console.error(`[ERROR] Error updating campaign ${req.params.id} for user ${req.user.uid}:`, error);
+    return res.status(500).json({ error: 'Failed to update campaign', message: error.message });
   }
 });
 
-// Delete a campaign by ID (account-specific)
+/**
+ * DELETE /campaigns/:id
+ * Delete a specific campaign. Only the owner can delete their campaign.
+ *
+ * @example
+ *   curl -X DELETE -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/campaign/campaigns/abc123
+ */
 router.delete('/campaigns/:id', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     const campaignId = req.params.id;
-    console.log(`Received request to delete campaign ${campaignId} for user: ${userId}`);
+    console.info(`[INFO] Deleting campaign ${campaignId} for user: ${userId}`);
     const campaignRef = db.collection('campaigns').doc(campaignId);
     const doc = await campaignRef.get();
     if (!doc.exists) {
-      console.log(`Campaign ${campaignId} not found for user: ${userId}`);
+      console.warn(`[WARN] Campaign ${campaignId} not found for deletion for user: ${userId}`);
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const campaignData = doc.data();
     if (campaignData.userId !== userId) {
-      console.log(`User ${userId} does not own campaign ${campaignId}`);
+      console.warn(`[WARN] User ${userId} is not authorized to delete campaign ${campaignId}`);
       return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
     }
     await campaignRef.delete();
-    console.log(`Campaign ${campaignId} deleted successfully for user: ${userId}`);
-    await logActivity(userId, 'campaign_deleted', `Deleted campaign: ${campaignData.name || 'Untitled'}`, { campaignId: campaignId });
-    res.status(200).json({ message: 'Campaign deleted successfully' });
+    console.info(`[INFO] Campaign ${campaignId} deleted successfully for user: ${userId}`);
+    await logActivity(userId, 'campaign_deleted', `Deleted campaign: ${campaignData.name || 'Untitled'}`, { campaignId });
+    return res.status(200).json({ message: 'Campaign deleted successfully' });
   } catch (error) {
-    console.error(`Error deleting campaign ${req.params.id} for user: ${req.user.uid}`, error);
-    res.status(500).json({ error: 'Failed to delete campaign', message: error.message });
+    console.error(`[ERROR] Error deleting campaign ${req.params.id} for user ${req.user.uid}:`, error);
+    return res.status(500).json({ error: 'Failed to delete campaign', message: error.message });
   }
 });
 
-// Read a specific campaign survey by ID (no authentication, as per original)
+/**
+ * GET /campaigns/survey/:id
+ * Retrieve survey information for a specific campaign.
+ * This endpoint does not require authentication.
+ *
+ * @example
+ *   curl https://yourdomain.com/campaign/campaigns/survey/abc123
+ */
 router.get('/campaigns/survey/:id', async (req, res) => {
   try {
     const campaignId = req.params.id;
-    console.log(`Received request to get campaign survey ${campaignId}`);
+    console.info(`[INFO] Retrieving survey data for campaign: ${campaignId}`);
     const campaignRef = db.collection('campaigns').doc(campaignId);
     const doc = await campaignRef.get();
     if (!doc.exists) {
-      console.log(`Campaign survey ${campaignId} not found`);
+      console.warn(`[WARN] Campaign survey ${campaignId} not found`);
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const campaignData = doc.data();
     const counts = await getCampaignCounts(campaignId);
-    console.log(`Successfully retrieved campaign survey ${campaignId}`);
-    res.status(200).json({ id: doc.id, ...campaignData, ...counts });
+    console.info(`[INFO] Successfully retrieved survey data for campaign: ${campaignId}`);
+    return res.status(200).json({ id: doc.id, ...campaignData, ...counts });
   } catch (error) {
-    console.error(`Error retrieving campaign survey ${req.params.id}`, error);
-    res.status(500).json({ error: 'Failed to retrieve campaign', message: error.message });
+    console.error(`[ERROR] Error retrieving campaign survey ${req.params.id}:`, error);
+    return res.status(500).json({ error: 'Failed to retrieve campaign', message: error.message });
   }
 });
 

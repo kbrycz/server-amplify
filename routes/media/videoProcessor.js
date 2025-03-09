@@ -1,3 +1,25 @@
+/**
+ * Video Processor API
+ *
+ * This module processes a raw video into a polished short using the Shotstack API.
+ * It also provides endpoints to check the status of the processing job.
+ *
+ * Endpoints:
+ *   POST /process-video
+ *     - Initiates processing of a raw video (identified by videoId) using Shotstack.
+ *   GET /status/job/:aiVideoId
+ *     - Check the status of a specific video processing job.
+ *
+ * @example
+ *   // Process a video:
+ *   curl -X POST -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" \
+ *        -d '{"videoId": "abc123", "desiredLength": 60, ...}' \
+ *        http://yourdomain.com/videoProcessor/process-video
+ *
+ *   // Check processing status:
+ *   curl -H "Authorization: Bearer YOUR_TOKEN" http://yourdomain.com/videoProcessor/status/job/def456
+ */
+
 const express = require('express');
 const admin = require('../../config/firebase');
 const { verifyToken } = require('../../config/middleware');
@@ -13,40 +35,52 @@ const SHOTSTACK_API_URL = 'https://api.shotstack.io/edit/stage/render';
 const SHOTSTACK_STATUS_URL = 'https://api.shotstack.io/edit/stage/render/';
 
 /**
- * Helper function to generate a signed URL for a Firebase Storage file.
+ * Helper: Generate a signed URL for a Firebase Storage file.
+ *
+ * @param {string} filePath - The file path in the bucket.
+ * @returns {Promise<string>} - The signed URL.
  */
 async function generateSignedUrl(filePath) {
-  console.log('Generating signed URL for file:', filePath);
+  console.info(`[INFO] Generating signed URL for file: ${filePath}`);
   try {
     const file = storage.bucket().file(filePath);
     const [signedUrl] = await file.getSignedUrl({
       action: 'read',
-      expires: Date.now() + 15 * 60 * 1000, // URL valid for 15 minutes
+      expires: Date.now() + 15 * 60 * 1000,
       version: 'v4',
     });
-    console.log('Signed URL generated:', signedUrl);
+    console.info(`[INFO] Signed URL generated: ${signedUrl}`);
     return signedUrl;
   } catch (error) {
-    console.error('Error generating signed URL:', error);
+    console.error('[ERROR] Error generating signed URL:', error);
     throw new Error('Failed to generate signed URL for video');
   }
 }
 
 /**
- * Helper function to get video duration (placeholder; replace with actual implementation).
+ * Helper: Get video duration.
+ * (This is a placeholder; in production, use a proper method like ffprobe.)
+ *
+ * @param {string} videoUrl - The signed URL of the video.
+ * @returns {Promise<number>} - Duration in seconds.
  */
 async function getVideoDuration(videoUrl) {
   try {
-    // Placeholder: assumes 2 minutes. For production, use ffprobe or similar
-    return 120; // 120 seconds
+    // Placeholder value: 120 seconds
+    return 120;
   } catch (error) {
-    console.error('Error checking video duration:', error);
+    console.error('[ERROR] Error checking video duration:', error);
     throw new Error('Failed to determine video duration');
   }
 }
 
 /**
- * Helper function to create an alert/notification document.
+ * Helper: Create an alert document.
+ *
+ * @param {string} userId - The user ID.
+ * @param {string} alertType - The type of alert.
+ * @param {string} message - The alert message.
+ * @param {Object} [extraData={}] - Extra data for the alert.
  */
 async function createAlert(userId, alertType, message, extraData = {}) {
   try {
@@ -59,17 +93,26 @@ async function createAlert(userId, alertType, message, extraData = {}) {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   } catch (err) {
-    console.error('Error creating alert:', err);
+    console.error('[ERROR] Error creating alert:', err);
   }
 }
 
-// POST /process-video - Process a video into a polished short
+/**
+ * POST /process-video
+ * Process a video into a polished short using the Shotstack API.
+ *
+ * Expects a JSON body with:
+ *   - videoId: ID of the raw video in surveyVideos.
+ *   - desiredLength, transitionEffect, captionText, backgroundMusic, outputResolution.
+ *
+ * Responds immediately with the AI video ID and processes the video in the background.
+ */
 router.post('/process-video', verifyToken, async (req, res) => {
   const userId = req.user.uid;
   const { videoId, desiredLength, transitionEffect, captionText, backgroundMusic, outputResolution } = req.body;
 
   if (!videoId) {
-    console.log('Validation Failed: videoId is required');
+    console.warn('[WARN] videoId is required');
     return res.status(400).json({ error: 'videoId is required' });
   }
 
@@ -78,42 +121,40 @@ router.post('/process-video', verifyToken, async (req, res) => {
     const userRef = db.collection('users').doc(userId);
     const userDoc = await userRef.get();
     if (!userDoc.exists) {
-      console.log('User not found for userId:', userId);
+      console.warn(`[WARN] User not found for userId: ${userId}`);
       return res.status(404).json({ error: 'User not found' });
     }
     const userData = userDoc.data();
     if (typeof userData.credits !== 'number' || userData.credits < 1) {
-      console.log('Insufficient credits for userId:', userId);
+      console.warn(`[WARN] Insufficient credits for userId: ${userId}`);
       return res.status(403).json({ error: 'Insufficient credits' });
     }
 
-    console.log('Fetching video with ID:', videoId);
+    console.info(`[INFO] Fetching raw video with ID: ${videoId}`);
     const videoRef = db.collection('surveyVideos').doc(videoId);
     const videoDoc = await videoRef.get();
     if (!videoDoc.exists) {
-      console.log('Video not found for videoId:', videoId);
+      console.warn(`[WARN] Video not found for videoId: ${videoId}`);
       return res.status(404).json({ error: 'Video not found' });
     }
-
     const videoData = videoDoc.data();
     const campaignId = videoData.campaignId;
-    console.log('Associated campaignId:', campaignId);
+    console.info(`[INFO] Associated campaignId: ${campaignId}`);
 
     // Verify campaign ownership
-    console.log('Verifying campaign ownership for campaignId:', campaignId);
     const campaignRef = db.collection('campaigns').doc(campaignId);
     const campaignDoc = await campaignRef.get();
     if (!campaignDoc.exists) {
-      console.log('Campaign not found for campaignId:', campaignId);
+      console.warn(`[WARN] Campaign not found for campaignId: ${campaignId}`);
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const campaignData = campaignDoc.data();
     if (campaignData.userId !== userId) {
-      console.log('Forbidden: User does not own this campaign');
+      console.warn(`[WARN] User ${userId} not authorized for campaign ${campaignId}`);
       return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
     }
 
-    // Create aiVideos document with initial status 'processing'
+    // Create a new document in aiVideos collection with status 'processing'
     const aiVideoData = {
       userId,
       campaignId,
@@ -124,36 +165,33 @@ router.post('/process-video', verifyToken, async (req, res) => {
     };
     const aiVideoRef = await db.collection('aiVideos').add(aiVideoData);
     const aiVideoId = aiVideoRef.id;
-    console.log('Created aiVideos document with ID:', aiVideoId);
+    console.info(`[INFO] Created aiVideos document with ID: ${aiVideoId}`);
 
-    // Respond to the client immediately with the aiVideoId
-    res.status(202).json({
-      message: 'Processing started',
-      aiVideoId,
-    });
+    // Respond immediately with processing status
+    res.status(202).json({ message: 'Processing started', aiVideoId });
 
-    // Process in the background
+    // Background processing
     setImmediate(async () => {
       try {
-        // Get the video URL from Firebase Storage and generate a signed URL
+        // Generate signed URL for the raw video
         const videoGsUrl = videoData.videoUrl;
-        console.log('Original video URL:', videoGsUrl);
+        console.info(`[INFO] Raw video URL: ${videoGsUrl}`);
         const gsPrefix = 'gs://amplify-dev-6b1c7.firebasestorage.app/';
         if (!videoGsUrl.startsWith(gsPrefix)) {
-          console.log('Invalid video URL format:', videoGsUrl);
+          console.error('[ERROR] Invalid video URL format:', videoGsUrl);
           throw new Error('Invalid video URL format');
         }
         const filePath = videoGsUrl.substring(gsPrefix.length);
-        console.log('Extracted file path:', filePath);
+        console.info(`[INFO] Extracted file path: ${filePath}`);
         const signedUrl = await generateSignedUrl(filePath);
 
-        // Check video duration
+        // Get video duration
         const videoDuration = await getVideoDuration(signedUrl);
-        console.log('Video duration (seconds):', videoDuration);
+        console.info(`[INFO] Video duration: ${videoDuration} seconds`);
 
-        // Define the clip length for Shotstack
-        const clipLength = Math.min(videoDuration, desiredLength || 60);
-        console.log('Using clip length (seconds):', clipLength);
+        // Determine clip length
+        const clipLength = Math.min(videoDuration, Number(desiredLength) || 60);
+        console.info(`[INFO] Using clip length: ${clipLength} seconds`);
 
         // Determine audio source
         let audioSrc = backgroundMusic;
@@ -161,34 +199,24 @@ router.post('/process-video', verifyToken, async (req, res) => {
           audioSrc = 'https://shotstack-assets.s3.ap-southeast-2.amazonaws.com/music/freepd/motions.mp3';
         }
 
-        // Shotstack template
+        // Build Shotstack template
         const shotstackTemplate = {
           timeline: {
             tracks: [
               {
                 clips: [
                   {
-                    asset: {
-                      type: 'video',
-                      src: signedUrl,
-                      trim: 0,
-                      volume: 0,
-                    },
+                    asset: { type: 'video', src: signedUrl, trim: 0, volume: 0 },
                     start: 0,
                     length: clipLength,
-                    transition: {
-                      in: transitionEffect || 'fade',
-                    },
+                    transition: { in: transitionEffect || 'fade' },
                   },
                 ],
               },
               {
                 clips: [
                   {
-                    asset: {
-                      type: 'audio',
-                      src: audioSrc,
-                    },
+                    asset: { type: 'audio', src: audioSrc },
                     start: 0,
                     length: clipLength,
                   },
@@ -208,9 +236,7 @@ router.post('/process-video', verifyToken, async (req, res) => {
                     },
                     start: 0,
                     length: 5,
-                    transition: {
-                      in: transitionEffect || 'fade',
-                    },
+                    transition: { in: transitionEffect || 'fade' },
                   },
                   {
                     asset: {
@@ -224,9 +250,7 @@ router.post('/process-video', verifyToken, async (req, res) => {
                     },
                     start: 5,
                     length: 10,
-                    transition: {
-                      in: 'slideUp',
-                    },
+                    transition: { in: 'slideUp' },
                   },
                   {
                     asset: {
@@ -240,19 +264,14 @@ router.post('/process-video', verifyToken, async (req, res) => {
                     },
                     start: clipLength - 5,
                     length: 5,
-                    transition: {
-                      in: transitionEffect || 'fade',
-                    },
+                    transition: { in: transitionEffect || 'fade' },
                   },
                 ],
               },
               {
                 clips: [
                   {
-                    asset: {
-                      type: 'image',
-                      src: 'https://shotstack-ingest-api-v1-sources.s3.ap-southeast-2.amazonaws.com/wzr6y0wtti/zzz01jh6-tp5k4-9e22c-dszkp-wa727z/source.jpg',
-                    },
+                    asset: { type: 'image', src: 'https://shotstack-ingest-api-v1-sources.s3.ap-southeast-2.amazonaws.com/wzr6y0wtti/zzz01jh6-tp5k4-9e22c-dszkp-wa727z/source.jpg' },
                     start: 0,
                     length: clipLength,
                     opacity: 0.8,
@@ -265,32 +284,25 @@ router.post('/process-video', verifyToken, async (req, res) => {
           output: {
             format: 'mp4',
             size: {
-              width: 1080,
-              height: 1920,
+              width: outputResolution ? Number(outputResolution.split('x')[0]) : 1080,
+              height: outputResolution ? Number(outputResolution.split('x')[1]) : 1920,
             },
           },
         };
 
-        console.log('Sending request to Shotstack API with template:', JSON.stringify(shotstackTemplate, null, 2));
+        console.info('[INFO] Sending request to Shotstack API with template:', JSON.stringify(shotstackTemplate, null, 2));
         const shotstackResponse = await axios.post(
           SHOTSTACK_API_URL,
           shotstackTemplate,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': SHOTSTACK_API_KEY,
-            },
-          }
+          { headers: { 'Content-Type': 'application/json', 'x-api-key': SHOTSTACK_API_KEY } }
         );
-
         if (!shotstackResponse.data.success) {
-          throw new Error(`Shotstack API failed to initiate render: ${shotstackResponse.data.message}`);
+          throw new Error(`Shotstack API failed: ${shotstackResponse.data.response.message}`);
         }
-
         const renderId = shotstackResponse.data.response.id;
-        console.log('Shotstack render initiated, renderId:', renderId);
+        console.info(`[INFO] Shotstack render initiated, renderId: ${renderId}`);
 
-        // Update aiVideos with renderId
+        // Update aiVideos document with renderId
         await aiVideoRef.update({
           renderId,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -301,17 +313,13 @@ router.post('/process-video', verifyToken, async (req, res) => {
         let processedVideoUrl;
         let pollAttempts = 0;
         const maxAttempts = 60;
-
         do {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+          await new Promise(resolve => setTimeout(resolve, 5000));
           pollAttempts++;
-          console.log(`Polling Shotstack render status, attempt ${pollAttempts}/${maxAttempts}`);
-          const statusResponse = await axios.get(
-            `${SHOTSTACK_STATUS_URL}${renderId}`,
-            {
-              headers: { 'x-api-key': SHOTSTACK_API_KEY },
-            }
-          );
+          console.info(`[INFO] Polling Shotstack status: attempt ${pollAttempts}/${maxAttempts}`);
+          const statusResponse = await axios.get(`${SHOTSTACK_STATUS_URL}${renderId}`, {
+            headers: { 'x-api-key': SHOTSTACK_API_KEY },
+          });
           renderStatus = statusResponse.data.response.status;
           if (renderStatus === 'done') {
             processedVideoUrl = statusResponse.data.response.url;
@@ -323,23 +331,19 @@ router.post('/process-video', verifyToken, async (req, res) => {
           }
         } while (renderStatus !== 'done');
 
-        console.log('Processed video URL from Shotstack:', processedVideoUrl);
+        console.info(`[INFO] Processed video URL from Shotstack: ${processedVideoUrl}`);
 
-        // Download and upload video
+        // Download and upload processed video
         const videoResponse = await axios.get(processedVideoUrl, { responseType: 'arraybuffer' });
         const videoBuffer = Buffer.from(videoResponse.data);
-
         const bucket = storage.bucket();
-        const fileName = `processed/${campaignId}/${renderId}.mp4`;
-        const file = bucket.file(fileName);
-        await file.save(videoBuffer, {
-          metadata: {
-            contentType: 'video/mp4',
-          },
+        const processedFileName = `enhancerVideos/processed/${campaignId}/${renderId}.mp4`;
+        const processedFile = bucket.file(processedFileName);
+        await processedFile.save(videoBuffer, {
+          metadata: { contentType: 'video/mp4' },
         });
-
-        const permanentUrl = `gs://${bucket.name}/${fileName}`;
-        console.log('Processed video uploaded to GCS:', permanentUrl);
+        const permanentUrl = `gs://${bucket.name}/${processedFileName}`;
+        console.info(`[INFO] Processed video uploaded to GCS: ${permanentUrl}`);
 
         // Update aiVideos document with completion details
         await aiVideoRef.update({
@@ -348,19 +352,19 @@ router.post('/process-video', verifyToken, async (req, res) => {
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
-        // Deduct credit
-        await userRef.update({
-          credits: admin.firestore.FieldValue.increment(-1),
-        });
+        // Deduct user credit
+        await userRef.update({ credits: admin.firestore.FieldValue.increment(-1) });
+        console.info('[INFO] Deducted one credit from user');
 
-        // Create success alert
+        // Log activity and create success alert
+        await logActivity(userId, 'video_enhancer_processed', `Processed video: ${videoData.title}`, { videoId, renderId });
         await createAlert(userId, 'enhancement_success', 'Your video has been enhanced successfully.', {
           videoId,
           renderId,
           processedVideoUrl: permanentUrl,
         });
       } catch (error) {
-        console.error('Background processing error:', error.message);
+        console.error('[ERROR] Background processing error:', error.message);
         await aiVideoRef.update({
           status: 'failed',
           error: error.message,
@@ -370,301 +374,46 @@ router.post('/process-video', verifyToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error initiating video processing:', error.message);
-    res.status(500).json({ error: 'Failed to initiate video processing', message: error.message });
+    console.error('[ERROR] Error initiating video processing:', error.message);
+    return res.status(500).json({ error: 'Failed to initiate video processing', message: error.message });
   }
 });
 
-// GET /status/job/:aiVideoId - Check the status of a specific video processing job
+/**
+ * GET /status/job/:aiVideoId
+ * Check the status of a specific video processing job.
+ */
 router.get('/status/job/:aiVideoId', verifyToken, async (req, res) => {
-  const { aiVideoId } = req.params;
+  const aiVideoId = req.params.aiVideoId;
   const userId = req.user.uid;
-
+  console.info(`[INFO] Checking processing status for AI video ID: ${aiVideoId}`);
   try {
     const aiVideoRef = db.collection('aiVideos').doc(aiVideoId);
     const aiVideoDoc = await aiVideoRef.get();
-
     if (!aiVideoDoc.exists) {
-      console.log('AI video not found for aiVideoId:', aiVideoId);
+      console.warn(`[WARN] AI video not found for ID: ${aiVideoId}`);
       return res.status(404).json({ error: 'AI video not found' });
     }
-
     const aiVideoData = aiVideoDoc.data();
     if (aiVideoData.userId !== userId) {
-      console.log('Forbidden: User does not own this AI video');
+      console.warn(`[WARN] User ${userId} not authorized to access AI video ${aiVideoId}`);
       return res.status(403).json({ error: 'Forbidden: You do not own this AI video' });
     }
-
     const status = aiVideoData.status;
     if (status === 'completed') {
-      return res.status(200).json({
-        status: 'completed',
-        processedVideoUrl: aiVideoData.processedVideoUrl,
-      });
+      return res.status(200).json({ status: 'completed', processedVideoUrl: aiVideoData.processedVideoUrl });
     } else if (status === 'failed') {
-      return res.status(200).json({
-        status: 'failed',
-        error: aiVideoData.error || 'Processing failed',
-      });
+      return res.status(200).json({ status: 'failed', error: aiVideoData.error || 'Processing failed' });
     } else {
-      return res.status(200).json({
-        status: 'processing',
-      });
+      return res.status(200).json({ status: 'processing' });
     }
   } catch (error) {
-    console.error('Error checking video processing status:', error);
-    res.status(500).json({
+    console.error('[ERROR] Error checking processing status:', error.message);
+    return res.status(500).json({
       status: 'unknown',
       error: 'Failed to check processing status',
       message: error.message,
     });
-  }
-});
-
-// GET /ai-videos/campaign/:campaignId/count - Count AI-generated videos for a campaign
-router.get('/ai-videos/campaign/:campaignId/count', verifyToken, async (req, res) => {
-  console.log('Received GET request to /videoProcessor/ai-videos/campaign/:campaignId/count');
-  const { campaignId } = req.params;
-  const userId = req.user.uid;
-  console.log('Campaign ID:', campaignId);
-  console.log('User ID from token:', userId);
-
-  try {
-    // Verify campaign existence and ownership
-    console.log('Verifying campaign existence and ownership for campaignId:', campaignId);
-    const campaignRef = db.collection('campaigns').doc(campaignId);
-    const campaignDoc = await campaignRef.get();
-    if (!campaignDoc.exists) {
-      console.log('Campaign not found for campaignId:', campaignId);
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-    const campaignData = campaignDoc.data();
-    if (campaignData.userId !== userId) {
-      console.log('Forbidden: User does not own this campaign');
-      return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
-    }
-
-    console.log('Counting AI videos for campaignId:', campaignId);
-    const snapshot = await db.collection('aiVideos')
-      .where('campaignId', '==', campaignId)
-      .get();
-
-    const count = snapshot.size;
-    console.log('Found AI video count:', count);
-    res.status(200).json({ count });
-  } catch (error) {
-    console.error('Error counting AI videos:', error);
-    res.status(500).json({ error: 'Failed to count AI videos', message: error.message });
-  }
-});
-
-// GET /ai-videos - Retrieve all processed videos for the user (most recent first)
-router.get('/ai-videos', verifyToken, async (req, res) => {
-  const userId = req.user.uid;
-  console.log('Fetching aiVideos for user:', userId);
-
-  try {
-    const snapshot = await db.collection('aiVideos')
-      .where('userId', '==', userId)
-      .orderBy('createdAt', 'desc')
-      .get();
-
-    const aiVideos = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-    console.log(`Found ${aiVideos.length} aiVideos`);
-
-    res.status(200).json(aiVideos);
-  } catch (error) {
-    console.error('Error in get ai-videos endpoint:', error);
-    res.status(500).json({ error: 'Failed to retrieve aiVideos', message: error.message });
-  }
-});
-
-// GET /ai-videos/campaign/:campaignId - Retrieve all processed videos for a specific campaign
-router.get('/ai-videos/campaign/:campaignId', verifyToken, async (req, res) => {
-  const { campaignId } = req.params;
-  const userId = req.user.uid;
-  console.log('Fetching aiVideos for campaign:', campaignId, 'and user:', userId);
-
-  try {
-    // Verify campaign existence and ownership
-    console.log('Verifying campaign existence and ownership for campaignId:', campaignId);
-    const campaignRef = db.collection('campaigns').doc(campaignId);
-    const campaignDoc = await campaignRef.get();
-    if (!campaignDoc.exists) {
-      console.log('Campaign not found for campaignId:', campaignId);
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-    const campaignData = campaignDoc.data();
-    if (campaignData.userId !== userId) {
-      console.log('Forbidden: User does not own this campaign');
-      return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
-    }
-
-    console.log('Querying aiVideos for campaignId:', campaignId);
-    const snapshot = await db.collection('aiVideos')
-      .where('campaignId', '==', campaignId)
-      .orderBy('createdAt', 'desc')
-      .get();
-
-    const aiVideos = await Promise.all(
-      snapshot.docs.map(async (doc) => {
-        const videoData = doc.data();
-        const filePath = videoData.processedVideoUrl?.replace(`gs://${storage.bucket().name}/`, '');
-        const signedUrl = filePath ? await generateSignedUrl(filePath) : null;
-        return {
-          id: doc.id,
-          ...videoData,
-          processedVideoUrl: signedUrl || videoData.processedVideoUrl,
-        };
-      })
-    );
-
-    console.log(`Found ${aiVideos.length} aiVideos for campaignId: ${campaignId}`);
-    res.status(200).json(aiVideos);
-  } catch (error) {
-    console.error('Error in get ai-videos/campaign endpoint:', error);
-    res.status(500).json({ error: 'Failed to retrieve AI videos', message: error.message });
-  }
-});
-
-// GET /status/:videoId - Check the status of a video processing job (legacy, kept for compatibility)
-router.get('/status/:videoId', verifyToken, async (req, res) => {
-  const { videoId } = req.params;
-  const userId = req.user.uid;
-  console.log('Checking processing status for videoId:', videoId);
-
-  try {
-    const aiVideoSnapshot = await db.collection('aiVideos')
-      .where('originalVideoId', '==', videoId)
-      .limit(1)
-      .get();
-
-    if (!aiVideoSnapshot.empty) {
-      console.log('Video already processed and exists in aiVideos');
-      return res.status(200).json({
-        status: 'completed',
-        aiVideoId: aiVideoSnapshot.docs[0].id,
-        processedVideoUrl: aiVideoSnapshot.docs[0].data().processedVideoUrl,
-      });
-    }
-
-    const videoRef = db.collection('surveyVideos').doc(videoId);
-    const videoDoc = await videoRef.get();
-
-    if (!videoDoc.exists) {
-      console.log('Video not found for videoId:', videoId);
-      return res.status(404).json({ error: 'Video not found' });
-    }
-
-    const videoData = videoDoc.data();
-    const campaignId = videoData.campaignId;
-
-    const campaignRef = db.collection('campaigns').doc(campaignId);
-    const campaignDoc = await campaignRef.get();
-
-    if (!campaignDoc.exists) {
-      console.log('Campaign not found for campaignId:', campaignId);
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    const campaignData = campaignDoc.data();
-    if (campaignData.userId !== userId) {
-      console.log('Forbidden: User does not own this campaign');
-      return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
-    }
-
-    const failureAlertSnapshot = await db.collection('alerts')
-      .where('userId', '==', userId)
-      .where('alertType', '==', 'enhancement_failure')
-      .where('extraData.videoId', '==', videoId)
-      .orderBy('createdAt', 'desc')
-      .limit(1)
-      .get();
-
-    if (!failureAlertSnapshot.empty) {
-      console.log('Found failure alert for videoId:', videoId);
-      return res.status(200).json({
-        status: 'failed',
-        error: failureAlertSnapshot.docs[0].data().message || 'Processing failed',
-      });
-    }
-
-    const lastUpdated = videoData.updatedAt ? videoData.updatedAt.toDate() : new Date();
-    const now = new Date();
-    const elapsedMs = now - lastUpdated;
-    const estimatedTotalMs = 2 * 60 * 1000;
-    const progress = Math.min(elapsedMs / estimatedTotalMs, 0.99);
-
-    console.log('Estimated progress for videoId:', videoId, progress);
-    return res.status(200).json({
-      status: 'processing',
-      progress: progress,
-      estimatedTimeRemaining: Math.max(0, estimatedTotalMs - elapsedMs),
-    });
-  } catch (error) {
-    console.error('Error checking video processing status:', error);
-    res.status(500).json({
-      status: 'unknown',
-      error: 'Failed to check processing status',
-      message: error.message,
-    });
-  }
-});
-
-// DELETE /ai-videos/:aiVideoId - Delete an AI-generated video
-router.delete('/ai-videos/:aiVideoId', verifyToken, async (req, res) => {
-  const { aiVideoId } = req.params;
-  const userId = req.user.uid;
-
-  try {
-    const aiVideoRef = db.collection('aiVideos').doc(aiVideoId);
-    const aiVideoDoc = await aiVideoRef.get();
-
-    if (!aiVideoDoc.exists) {
-      console.log('AI video not found for aiVideoId:', aiVideoId);
-      return res.status(404).json({ error: 'AI video not found' });
-    }
-
-    const aiVideoData = aiVideoDoc.data();
-    const campaignId = aiVideoData.campaignId;
-
-    const campaignRef = db.collection('campaigns').doc(campaignId);
-    const campaignDoc = await campaignRef.get();
-
-    if (!campaignDoc.exists) {
-      console.log('Campaign not found for campaignId:', campaignId);
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    const campaignData = campaignDoc.data();
-    if (campaignData.userId !== userId) {
-      console.log('Forbidden: User does not own this campaign');
-      return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
-    }
-
-    await aiVideoRef.delete();
-    console.log('Deleted AI video document with ID:', aiVideoId);
-
-    const processedVideoUrl = aiVideoData.processedVideoUrl;
-    if (processedVideoUrl) {
-      const bucket = storage.bucket();
-      const fileName = processedVideoUrl.replace(`gs://${bucket.name}/`, '');
-      const file = bucket.file(fileName);
-      try {
-        await file.delete();
-        console.log('Deleted video file from GCS:', fileName);
-      } catch (deleteError) {
-        console.error('Error deleting video file from GCS:', deleteError.message);
-      }
-    }
-
-    res.status(200).json({ message: 'AI video deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting AI video:', error.message);
-    res.status(500).json({ error: 'Failed to delete AI video', message: error.message });
   }
 });
 

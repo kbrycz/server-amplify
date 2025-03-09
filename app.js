@@ -4,7 +4,7 @@ const admin = require('./config/firebase'); // Import the initialized Firebase i
 
 // Updated imports based on the new folder structure
 const authRoutes = require('./routes/auth/auth');
-const userRoutes = require('./routes/user/user');
+const userRoutes = require('./routes/account/user');
 const campaignRoutes = require('./routes/campaigns/campaign');
 const campaignAIRoutes = require('./routes/campaigns/campaignAI');
 const draftCampaignRoutes = require('./routes/campaigns/draftCampaign');
@@ -17,6 +17,11 @@ const thumbnailEndpoint = require('./routes/media/thumbnailEndpoint');
 const recentActivity = require('./routes/activity/recentActivity');
 const alertsRoutes = require('./routes/activity/alerts');
 const stripeRoutes = require('./routes/stripe/stripe');
+const templatesRoutes = require('./routes/templates/templates');
+const draftTemplatesRoutes = require('./routes/templates/draftTemplates');
+const creatomateProcessRoutes = require('./routes/creatomate/creatomateProcess');
+const dashboardRoutes = require('./routes/dashboard/dashboard');
+
 
 const app = express();
 
@@ -24,7 +29,7 @@ const app = express();
 const corsOptions = {
   origin: '*', // In production, use your frontend domain (e.g., 'https://yourdomain.com')
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control'],
   credentials: true
 };
 
@@ -48,6 +53,10 @@ app.use('/videoEnhancer', videoEnhancerRoutes);
 app.use('/thumbnailEndpoint', thumbnailEndpoint);
 app.use('/activity', recentActivity);
 app.use('/alerts', alertsRoutes);
+app.use('/templates', templatesRoutes);
+app.use('/draftTemplates', draftTemplatesRoutes);
+app.use('/creatomate', creatomateProcessRoutes);
+app.use('/dashboard', dashboardRoutes);
 
 app.get('/', (req, res) => {
   res.send('Welcome to the API');

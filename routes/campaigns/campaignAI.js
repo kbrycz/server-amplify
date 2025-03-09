@@ -1,3 +1,20 @@
+/**
+ * Campaign Generation API (Gemini)
+ *
+ * This module exposes an endpoint to generate campaign JSON data based on a user prompt
+ * using the Gemini API. The response is a structured JSON object for a "Create Campaign" form.
+ *
+ * Endpoint:
+ *   POST /generate-campaign
+ *     - Accepts a prompt in the request body and returns generated campaign data.
+ *
+ * @example
+ *   curl -X POST -H "Content-Type: application/json" \
+ *        -d '{"prompt": "Create a campaign for a new tech startup"}' \
+ *        https://yourdomain.com/campaign/generate-campaign
+ */
+
+
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();

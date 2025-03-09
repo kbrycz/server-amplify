@@ -1,90 +1,102 @@
-// alerts.js
+/**
+ * Alerts API
+ *
+ * This module handles the retrieval and updating of alerts for an authenticated user.
+ *
+ * Endpoints:
+ *   GET /alerts
+ *     - Retrieves up to 10 alerts for the authenticated user.
+ *     - Unread alerts are prioritized; if fewer than 10 unread alerts are found,
+ *       read alerts are appended to reach up to 10 total alerts.
+ *
+ *   PATCH /alerts/mark-read
+ *     - Marks all unread alerts for the authenticated user as read.
+ *
+ * @example
+ *   // Get alerts:
+ *   curl -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/alerts
+ *
+ *   // Mark alerts as read:
+ *   curl -X PATCH -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/alerts/mark-read
+ */
+
 const express = require('express');
-const admin = require('../../config/firebase'); // Your Firebase Admin instance
-const { verifyToken } = require('../../config/middleware'); // Your token verification middleware
+const admin = require('../../config/firebase'); // Firebase Admin instance
+const { verifyToken } = require('../../config/middleware'); // Token verification middleware
 
 const router = express.Router();
 const db = admin.firestore();
 
-// GET /alerts
-// Retrieve up to 10 alerts for the authenticated user, prioritizing unread alerts first,
-// followed by read alerts, both sorted by createdAt descending
+/**
+ * GET /alerts
+ * Retrieves up to 10 alerts for the authenticated user. Unread alerts are prioritized,
+ * followed by read alerts if needed.
+ */
 router.get('/', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     const maxAlerts = 10;
-    console.log(`[DEBUG] Fetching alerts for userId: ${userId}`);
+    console.log(`[INFO] Retrieving alerts for user: ${userId}`);
 
-    // Step 1: Fetch unread alerts, sorted by createdAt descending
-    console.log('[DEBUG] Querying unread alerts...');
-    const unreadQuery = db
-      .collection('alerts')
+    // Step 1: Fetch unread alerts
+    const unreadQuery = db.collection('alerts')
       .where('userId', '==', userId)
       .where('read', '==', false)
       .orderBy('createdAt', 'desc')
       .limit(maxAlerts);
     const unreadSnapshot = await unreadQuery.get();
-    console.log(`[DEBUG] Unread alerts snapshot size: ${unreadSnapshot.size}`);
     const unreadAlerts = unreadSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    console.log(`[DEBUG] Unread alerts count: ${unreadAlerts.length}`);
+    console.log(`[DEBUG] Found ${unreadAlerts.length} unread alerts`);
 
-    // Step 2: If we have fewer than 10 unread alerts, fetch read alerts to fill the rest
+    // Step 2: If unread alerts are fewer than maxAlerts, fetch additional read alerts
     let allAlerts = [...unreadAlerts];
     const remainingSlots = maxAlerts - unreadAlerts.length;
-    console.log(`[DEBUG] Remaining slots for read alerts: ${remainingSlots}`);
-
     if (remainingSlots > 0) {
-      console.log('[DEBUG] Querying read alerts...');
-      const readQuery = db
-        .collection('alerts')
+      const readQuery = db.collection('alerts')
         .where('userId', '==', userId)
         .where('read', '==', true)
         .orderBy('createdAt', 'desc')
         .limit(remainingSlots);
       const readSnapshot = await readQuery.get();
-      console.log(`[DEBUG] Read alerts snapshot size: ${readSnapshot.size}`);
       const readAlerts = readSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      console.log(`[DEBUG] Read alerts count: ${readAlerts.length}`);
-
-      // Step 3: Combine unread and read alerts
-      allAlerts = [...unreadAlerts, ...readAlerts];
+      console.log(`[DEBUG] Found ${readAlerts.length} read alerts to fill remaining slots`);
+      allAlerts = allAlerts.concat(readAlerts);
     }
 
-    // Step 4: Return the combined list (up to 10 alerts)
-    console.log(`[DEBUG] Total alerts to return: ${allAlerts.length}`);
-    res.status(200).json(allAlerts);
+    console.log(`[INFO] Returning total ${allAlerts.length} alerts for user: ${userId}`);
+    return res.status(200).json(allAlerts);
   } catch (error) {
-    console.error('[ERROR] Error fetching alerts:', error);
-    res.status(500).json({ error: 'Failed to fetch alerts', message: error.message });
+    console.error('[ERROR] Failed to fetch alerts:', error);
+    return res.status(500).json({ error: 'Failed to fetch alerts', message: error.message });
   }
 });
 
-// PATCH /alerts/mark-read
-// Mark all alerts for the authenticated user as read
+/**
+ * PATCH /alerts/mark-read
+ * Marks all unread alerts for the authenticated user as read.
+ */
 router.patch('/mark-read', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
-    console.log(`[DEBUG] Marking alerts as read for userId: ${userId}`);
+    console.log(`[INFO] Marking alerts as read for user: ${userId}`);
 
-    const alertsQuery = db
-      .collection('alerts')
+    const alertsQuery = db.collection('alerts')
       .where('userId', '==', userId)
       .where('read', '==', false);
-
     const snapshot = await alertsQuery.get();
-    console.log(`[DEBUG] Unread alerts to mark as read: ${snapshot.size}`);
+    console.log(`[DEBUG] Found ${snapshot.size} unread alerts to update`);
 
     const batch = db.batch();
-    snapshot.docs.forEach((doc) => {
+    snapshot.docs.forEach(doc => {
       batch.update(doc.ref, { read: true });
     });
 
     await batch.commit();
-    console.log('[DEBUG] Batch commit successful');
-    res.status(200).json({ message: 'All alerts marked as read' });
+    console.log('[INFO] Successfully marked alerts as read');
+    return res.status(200).json({ message: 'All alerts marked as read' });
   } catch (error) {
-    console.error('[ERROR] Error marking alerts as read:', error);
-    res.status(500).json({ error: 'Failed to mark alerts as read', message: error.message });
+    console.error('[ERROR] Failed to mark alerts as read:', error);
+    return res.status(500).json({ error: 'Failed to mark alerts as read', message: error.message });
   }
 });
 
