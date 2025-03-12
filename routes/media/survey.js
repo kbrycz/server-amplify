@@ -94,7 +94,7 @@ router.post('/upload', upload.single('video'), async (req, res) => {
       return res.status(500).json({ error: 'Campaign does not have an associated userId' });
     }
 
-    // Create a new document in surveyVideos collection
+    // Create a new document in surveyVideos collection with new fields for enhanced video
     const videoData = {
       campaignId,
       userId,
@@ -102,7 +102,9 @@ router.post('/upload', upload.single('video'), async (req, res) => {
       lastName: lastName || '',
       email: email || '',
       zipCode: zipCode || '',
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      isVideoEnhanced: false,  // Default set to false
+      videoEnhancedUrl: ''     // Default empty string
     };
     console.info('[INFO] Creating new surveyVideos document with data:', videoData);
     const videoRef = await db.collection('surveyVideos').add(videoData);
@@ -302,6 +304,29 @@ router.get('/video/:videoId', verifyToken, async (req, res) => {
     });
   } catch (error) {
     console.error('[ERROR] Error fetching single survey video:', error);
+    return res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+/**
+ * GET /survey/videos/enhanced/count
+ * Authenticated endpoint to count survey videos that have been enhanced.
+ * It filters documents where isVideoEnhanced is true.
+ */
+router.get('/videos/enhanced/count', verifyToken, async (req, res) => {
+  console.info('[INFO] GET /survey/videos/enhanced/count - Received request');
+  const userId = req.user.uid;
+  try {
+    // Query surveyVideos for documents where 'isVideoEnhanced' is true
+    const snapshot = await db.collection('surveyVideos')
+      .where('userId', '==', userId)
+      .where('isVideoEnhanced', '==', true)
+      .get();
+    const count = snapshot.size;
+    console.info(`[INFO] Found ${count} enhanced videos for user ${userId}`);
+    return res.status(200).json({ count });
+  } catch (error) {
+    console.error('[ERROR] Error counting enhanced videos:', error);
     return res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 });

@@ -11,8 +11,6 @@ const draftCampaignRoutes = require('./routes/campaigns/draftCampaign');
 const representativesRoutes = require('./routes/civic/representatives');
 const surveyRoutes = require('./routes/media/survey');
 const videoEditorRoutes = require('./routes/media/videoEditor');
-const videoProcessorRoutes = require('./routes/media/videoProcessor');
-const videoEnhancerRoutes = require('./routes/media/videoEnhancer');
 const thumbnailEndpoint = require('./routes/media/thumbnailEndpoint');
 const recentActivity = require('./routes/activity/recentActivity');
 const alertsRoutes = require('./routes/activity/alerts');
@@ -21,6 +19,7 @@ const templatesRoutes = require('./routes/templates/templates');
 const draftTemplatesRoutes = require('./routes/templates/draftTemplates');
 const creatomateProcessRoutes = require('./routes/creatomate/creatomateProcess');
 const dashboardRoutes = require('./routes/dashboard/dashboard');
+const healthRoutes = require('./routes/health/health');
 
 
 const app = express();
@@ -47,9 +46,7 @@ app.use('/auth', authRoutes);
 app.use('/user', userRoutes);
 app.use('/survey', surveyRoutes);
 app.use('/videoEditor', videoEditorRoutes);
-app.use('/videoProcessor', videoProcessorRoutes);
 app.use('/representatives', representativesRoutes);
-app.use('/videoEnhancer', videoEnhancerRoutes);
 app.use('/thumbnailEndpoint', thumbnailEndpoint);
 app.use('/activity', recentActivity);
 app.use('/alerts', alertsRoutes);
@@ -57,6 +54,9 @@ app.use('/templates', templatesRoutes);
 app.use('/draftTemplates', draftTemplatesRoutes);
 app.use('/creatomate', creatomateProcessRoutes);
 app.use('/dashboard', dashboardRoutes);
+app.use('/health', healthRoutes);
+
+
 
 app.get('/', (req, res) => {
   res.send('Welcome to the API');

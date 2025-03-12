@@ -124,17 +124,20 @@ router.post('/creatomate-process', verifyToken, async (req, res) => {
       console.warn(`[WARN] User ${userId} not authorized for campaign ${campaignId}`);
       return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
     }
-    // Create a new document in "creatomateJobs" collection
-    const jobData = {
-      userId,
-      campaignId,
-      originalVideoId: videoId,
-      status: 'processing',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    };
-    const jobRef = await db.collection('creatomateJobs').add(jobData);
-    const localJobId = jobRef.id;
+    
+    // Update the survey video document to mark it as enhanced.
+    // This sets isVideoEnhanced to true and videoEnhancedUrl to the same value as videoUrl.
+    await videoRef.update({
+      isVideoEnhanced: true,
+      videoEnhancedUrl: videoData.videoUrl, // For now, set to the original videoUrl
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+    console.info(`[INFO] Survey video ${videoId} marked as enhanced.`);
+    // Respond immediately as we no longer process Creatomate jobs.
+    return res.status(200).json({ message: 'Video enhanced successfully', videoId });
+    
+    /* ----- BEGIN: Comment out Creatomate API call for testing ----- */
+    /*
     // Generate signed URL for the raw video
     const videoGsUrl = videoData.videoUrl;
     const gsPrefix = 'gs://amplify-dev-6b1c7.firebasestorage.app/';
@@ -231,6 +234,8 @@ router.post('/creatomate-process', verifyToken, async (req, res) => {
         }
       }, 5000);
     });
+    */
+    /* ----- END: Comment out Creatomate API call for testing ----- */
   } catch (error) {
     console.error('[ERROR] Error initiating Creatomate processing:', error.message);
     return res.status(500).json({ error: 'Failed to initiate video processing', message: error.message });
@@ -255,34 +260,8 @@ router.get('/creatomate-process/status/job/:jobId', verifyToken, async (req, res
     if (jobData.userId !== userId) {
       return res.status(403).json({ error: 'Forbidden: You do not own this job' });
     }
-    if (jobData.creatomateJobId) {
-      try {
-        const statusResponse = await axios.get(`${CREATOMATE_API_URL}/${jobData.creatomateJobId}`, {
-          headers: {
-            'Authorization': `Bearer ${CREATOMATE_API_KEY}`,
-            'Cache-Control': 'no-cache'
-          }
-        });
-        const updatedData = statusResponse.data;
-        console.info('[DEBUG] GET job status response:', updatedData);
-        const updatePayload = {
-          status: updatedData.status,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        };
-        if (updatedData.status === 'succeeded' && updatedData.url !== undefined) {
-          const permanentUrl = await downloadAndSaveVideo(updatedData.url, jobData.campaignId, localJobId);
-          updatePayload.processedVideoUrl = permanentUrl;
-          updatePayload.snapshotUrl = updatedData.snapshot_url;
-        }
-        await jobRef.update(updatePayload);
-        return res.status(200).json({ id: localJobId, ...updatedData });
-      } catch (err) {
-        console.error('[ERROR] Error fetching Creatomate job status:', err.message);
-        return res.status(500).json({ error: 'Failed to fetch job status', message: err.message });
-      }
-    } else {
-      return res.status(200).json({ id: localJobId, ...jobData });
-    }
+    // For testing, simply return the job document.
+    return res.status(200).json({ id: localJobId, ...jobData });
   } catch (error) {
     console.error('[ERROR] Error checking job status:', error.message);
     return res.status(500).json({ error: 'Failed to check job status', message: error.message });
