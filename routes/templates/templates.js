@@ -5,6 +5,7 @@
  *
  * The "templates" collection documents have the following fields:
  *   - userId
+ *   - namespaceId
  *   - name
  *   - captionType
  *   - captionPosition
@@ -20,8 +21,8 @@
  *
  * Endpoints:
  *   POST   /templates         - Create a new template.
- *   GET    /templates         - Get all templates for the authenticated user.
- *   GET    /templates/count   - Get the total count of templates for the authenticated user.
+ *   GET    /templates         - Get all templates for the authenticated user in a given namespace.
+ *   GET    /templates/count   - Get the total count of templates for the authenticated user in a given namespace.
  *   GET    /templates/:id     - Get a specific template by ID (account-specific).
  *   PUT    /templates/:id     - Update an existing template (account-specific).
  *   DELETE /templates/:id     - Delete a template (account-specific).
@@ -32,6 +33,7 @@
 const express = require('express');
 const admin = require('../../config/firebase');
 const { verifyToken } = require('../../config/middleware');
+const { logActivity } = require('../../utils/activityLogger');
 
 const router = express.Router();
 const db = admin.firestore();
@@ -41,11 +43,13 @@ const templatesCollection = db.collection('templates');
 
 /**
  * Create a new template.
+ * Requires a valid namespaceId in the request body.
  */
 router.post('/', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     const {
+      namespaceId,
       name,
       captionType,
       captionPosition,
@@ -61,9 +65,23 @@ router.post('/', verifyToken, async (req, res) => {
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
+    if (!namespaceId) {
+      return res.status(400).json({ error: 'namespaceId is required' });
+    }
+
+    // Verify the namespace exists and belongs to the user.
+    const nsDoc = await db.collection('namespaces').doc(namespaceId).get();
+    if (!nsDoc.exists) {
+      return res.status(404).json({ error: 'Namespace not found' });
+    }
+    const nsData = nsDoc.data();
+    if (nsData.accountId !== userId) {
+      return res.status(403).json({ error: 'You are not authorized to use this namespace' });
+    }
 
     const templateData = {
       userId,
+      namespaceId,
       name,
       captionType: captionType || '',
       captionPosition: captionPosition || '',
@@ -81,6 +99,9 @@ router.post('/', verifyToken, async (req, res) => {
     const docRef = await templatesCollection.add(templateData);
     const createdDoc = await docRef.get();
 
+    // Log activity that a template was created.
+    await logActivity(userId, 'template_created', `Created template: ${name}`, namespaceId, { templateId: docRef.id });
+
     res.status(201).json({ id: createdDoc.id, ...createdDoc.data() });
   } catch (error) {
     console.error('Error creating template:', error);
@@ -89,13 +110,20 @@ router.post('/', verifyToken, async (req, res) => {
 });
 
 /**
- * Get all templates for the authenticated user.
+ * Get all templates for the authenticated user in a given namespace.
+ * Expects a query parameter: namespaceId.
  */
 router.get('/', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
+    const namespaceId = req.query.namespaceId;
+    if (!namespaceId) {
+      return res.status(400).json({ error: 'namespaceId query parameter is required' });
+    }
+
     const snapshot = await templatesCollection
       .where('userId', '==', userId)
+      .where('namespaceId', '==', namespaceId)
       .orderBy('createdAt', 'desc')
       .get();
     const templates = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -107,13 +135,19 @@ router.get('/', verifyToken, async (req, res) => {
 });
 
 /**
- * Get the total count of templates for the authenticated user.
+ * Get the total count of templates for the authenticated user in a given namespace.
+ * Expects a query parameter: namespaceId.
  */
 router.get('/count', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
+    const namespaceId = req.query.namespaceId;
+    if (!namespaceId) {
+      return res.status(400).json({ error: 'namespaceId query parameter is required' });
+    }
     const snapshot = await templatesCollection
       .where('userId', '==', userId)
+      .where('namespaceId', '==', namespaceId)
       .get();
     const count = snapshot.size;
     res.status(200).json({ count });
@@ -151,6 +185,7 @@ router.get('/:id', verifyToken, async (req, res) => {
 
 /**
  * Update an existing template.
+ * The namespaceId cannot be updated.
  */
 router.put('/:id', verifyToken, async (req, res) => {
   try {
@@ -181,7 +216,7 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: You do not own this template' });
     }
 
-    // Prepare update data with provided fields and update the lastModified timestamp.
+    // Prepare update data and do not allow namespaceId update.
     const updateData = {
       lastModified: admin.firestore.FieldValue.serverTimestamp(),
     };
@@ -199,6 +234,9 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     await docRef.update(updateData);
     const updatedDoc = await docRef.get();
+
+    // Log activity that the template was updated.
+    await logActivity(userId, 'template_updated', `Updated template: ${updateData.name || data.name}`, data.namespaceId, { templateId: id });
 
     res.status(200).json({ id: updatedDoc.id, ...updatedDoc.data() });
   } catch (error) {
@@ -227,6 +265,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
     }
 
     await docRef.delete();
+    await logActivity(userId, 'template_deleted', `Deleted template: ${data.name}`, data.namespaceId, { templateId: id });
     res.status(200).json({ message: 'Template deleted successfully' });
   } catch (error) {
     console.error('Error deleting template:', error);

@@ -4,40 +4,17 @@
  * This module handles authentication-related endpoints for user profile management,
  * including updating subscription plans, signing up users, fetching profiles, and account deletion.
  *
+ * When a new user signs up, a default namespace is automatically created. Rather than storing a list
+ * of namespaces on the user profile, we recommend querying the namespaces collection to check which namespaces
+ * a user belongs to.
+ *
  * Endpoints:
- *
- * POST /update-plan
- *   - Updates the user's plan to 'basic' and resets credits to 5.
- *   - Example:
- *     curl -X POST -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" \
- *          -d '{"plan": "basic"}' https://yourdomain.com/auth/update-plan
- *
- * POST /signup
- *   - Creates a new user profile in Firestore.
- *   - Requires "firstName" and "lastName" in the request body.
- *   - Example:
- *     curl -X POST -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" \
- *          -d '{"firstName": "John", "lastName": "Doe"}' https://yourdomain.com/auth/signup
- *
- * GET /profile
- *   - Retrieves the authenticated user's profile from Firestore.
- *   - Example:
- *     curl -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/auth/profile
- *
- * GET /user
- *   - Returns the user information stored in the authentication token.
- *   - Example:
- *     curl -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/auth/user
- *
- * GET /data
- *   - Returns protected data along with user details.
- *   - Example:
- *     curl -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/auth/data
- *
- * DELETE /delete-account
- *   - Deletes the authenticated user's account from Firebase Auth and Firestore.
- *   - Example:
- *     curl -X DELETE -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/auth/delete-account
+ *   POST /update-plan        - Update the user's plan to 'basic' and reset credits.
+ *   POST /signup             - Create a new user profile and a default namespace.
+ *   GET /profile             - Retrieve the authenticated user's profile.
+ *   GET /user                - Return user info from the auth token.
+ *   GET /data                - Return protected data along with user details.
+ *   DELETE /delete-account   - Delete the authenticated user's account.
  */
 
 const express = require('express');
@@ -82,7 +59,7 @@ router.post('/update-plan', verifyToken, async (req, res) => {
 
 /**
  * POST /signup
- * Creates a new user profile in Firestore.
+ * Creates a new user profile in Firestore and automatically creates a default namespace.
  */
 router.post('/signup', verifyToken, async (req, res) => {
   console.log(`[INFO] Signup request received with body:`, req.body);
@@ -96,6 +73,7 @@ router.post('/signup', verifyToken, async (req, res) => {
   }
 
   try {
+    // Create user profile
     await admin.firestore().collection('users').doc(uid).set({
       email,
       firstName,
@@ -109,6 +87,34 @@ router.post('/signup', verifyToken, async (req, res) => {
     });
 
     console.log(`[INFO] User profile created for UID: ${uid}`);
+
+    // Create a default namespace for the new user.
+    // We do not store a list of namespaces on the user profile;
+    // instead, when needed you can query the namespaces collection by filtering on members.
+    const defaultNamespace = {
+      name: 'default',
+      description: `Default namespace for ${firstName} ${lastName}`,
+      accountId: uid,
+      // The default namespace will only include the creator as a member.
+      // The user is assigned an "admin" role here for default operations,
+      // but this namespace is not meant to be modified by the user to add more members.
+      members: [{
+        email,
+        permission: 'admin',
+        status: 'active'
+      }],
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    try {
+      await admin.firestore().collection('namespaces').add(defaultNamespace);
+      console.log(`[INFO] Default namespace created for UID: ${uid}`);
+    } catch (nsError) {
+      console.error(`[ERROR] Failed to create default namespace for UID ${uid}:`, nsError.message);
+      // Proceed without failing the signup process.
+    }
+
     return res.status(201).json({
       message: 'Profile created successfully',
       uid,

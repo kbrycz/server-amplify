@@ -3,16 +3,9 @@
  *
  * This module provides endpoints for managing draft templates for authenticated users.
  *
- * Endpoints:
- *   POST   /drafts         - Create a new draft template.
- *   GET    /drafts         - Retrieve all draft templates for the authenticated user.
- *   GET    /drafts/count   - Count the draft templates for the authenticated user.
- *   GET    /drafts/:id     - Retrieve a specific draft template by ID (account-specific).
- *   PUT    /drafts/:id     - Update a specific draft template (account-specific).
- *   DELETE /drafts/:id     - Delete a specific draft template (account-specific).
- *
  * Each draft template document includes the following fields:
  *   - userId
+ *   - namespaceId
  *   - name
  *   - captionType
  *   - captionPosition
@@ -26,12 +19,21 @@
  *   - createdAt
  *   - dateModified
  *
+ * Endpoints:
+ *   POST   /drafts         - Create a new draft template.
+ *   GET    /drafts         - Retrieve all draft templates for the authenticated user in a given namespace.
+ *   GET    /drafts/count   - Count the draft templates for the authenticated user in a given namespace.
+ *   GET    /drafts/:id     - Retrieve a specific draft template by ID (account-specific).
+ *   PUT    /drafts/:id     - Update a specific draft template (account-specific).
+ *   DELETE /drafts/:id     - Delete a specific draft template (account-specific).
+ *
  * All endpoints are protected by token verification.
  */
 
 const express = require('express');
 const admin = require('../../config/firebase');
 const { verifyToken } = require('../../config/middleware');
+const { logActivity } = require('../../utils/activityLogger');
 
 const router = express.Router();
 
@@ -47,11 +49,13 @@ const db = admin.firestore();
 /**
  * POST /drafts
  * Create a new draft template associated with the authenticated user.
+ * Requires a valid namespaceId in the request body.
  */
 router.post('/drafts', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     const {
+      namespaceId,
       name,
       captionType,
       captionPosition,
@@ -67,9 +71,23 @@ router.post('/drafts', verifyToken, async (req, res) => {
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
+    if (!namespaceId) {
+      return res.status(400).json({ error: 'namespaceId is required' });
+    }
+    
+    // Verify the namespace exists and belongs to the user.
+    const nsDoc = await db.collection('namespaces').doc(namespaceId).get();
+    if (!nsDoc.exists) {
+      return res.status(404).json({ error: 'Namespace not found' });
+    }
+    const nsData = nsDoc.data();
+    if (nsData.accountId !== userId) {
+      return res.status(403).json({ error: 'You are not authorized to use this namespace' });
+    }
     
     const draftData = {
       userId,
+      namespaceId,
       name,
       captionType: captionType || '',
       captionPosition: captionPosition || '',
@@ -85,6 +103,10 @@ router.post('/drafts', verifyToken, async (req, res) => {
     };
     
     const draftRef = await db.collection('draftTemplates').add(draftData);
+    
+    // Log activity that a draft template was created.
+    await logActivity(userId, 'draft_template_created', `Created draft template: ${name}`, namespaceId, { draftTemplateId: draftRef.id });
+    
     res.status(201).json({ id: draftRef.id, ...draftData });
   } catch (error) {
     console.error(`[ERROR] Error creating draft template for user ${req.user.uid}:`, error);
@@ -94,13 +116,20 @@ router.post('/drafts', verifyToken, async (req, res) => {
 
 /**
  * GET /drafts
- * Retrieve all draft templates for the authenticated user, sorted by last modified date (descending).
+ * Retrieve all draft templates for the authenticated user in a given namespace,
+ * sorted by last modified date (descending).
+ * Expects a query parameter: namespaceId.
  */
 router.get('/drafts', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
+    const namespaceId = req.query.namespaceId;
+    if (!namespaceId) {
+      return res.status(400).json({ error: 'namespaceId query parameter is required' });
+    }
     const snapshot = await db.collection('draftTemplates')
       .where('userId', '==', userId)
+      .where('namespaceId', '==', namespaceId)
       .orderBy('dateModified', 'desc')
       .get();
     const drafts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -113,13 +142,19 @@ router.get('/drafts', verifyToken, async (req, res) => {
 
 /**
  * GET /drafts/count
- * Count the number of draft templates for the authenticated user.
+ * Count the number of draft templates for the authenticated user in a given namespace.
+ * Expects a query parameter: namespaceId.
  */
 router.get('/drafts/count', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
+    const namespaceId = req.query.namespaceId;
+    if (!namespaceId) {
+      return res.status(400).json({ error: 'namespaceId query parameter is required' });
+    }
     const snapshot = await db.collection('draftTemplates')
       .where('userId', '==', userId)
+      .where('namespaceId', '==', namespaceId)
       .get();
     const count = snapshot.size;
     res.status(200).json({ count });
@@ -174,35 +209,21 @@ router.put('/drafts/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: You do not own this draft template' });
     }
     
-    // Extract fields from request body
-    const {
-      name,
-      captionType,
-      captionPosition,
-      outtroBackgroundColors,
-      outtroFontColor,
-      image,
-      outroText,
-      outroTheme,
-      showOutro,
-      theme
-    } = req.body;
-    
-    // Prepare update data with provided fields and update the dateModified timestamp
+    // Prepare update data with provided fields and update the dateModified timestamp.
     const updateData = {
       dateModified: admin.firestore.FieldValue.serverTimestamp(),
     };
 
-    if (name !== undefined) updateData.name = name;
-    if (captionType !== undefined) updateData.captionType = captionType;
-    if (captionPosition !== undefined) updateData.captionPosition = captionPosition;
-    if (outtroBackgroundColors !== undefined) updateData.outtroBackgroundColors = outtroBackgroundColors;
-    if (outtroFontColor !== undefined) updateData.outtroFontColor = outtroFontColor;
-    if (image !== undefined) updateData.image = image;
-    if (outroText !== undefined) updateData.outroText = outroText;
-    if (outroTheme !== undefined) updateData.outroTheme = outroTheme;
-    if (showOutro !== undefined) updateData.showOutro = showOutro;
-    if (theme !== undefined) updateData.theme = theme;
+    if (req.body.name !== undefined) updateData.name = req.body.name;
+    if (req.body.captionType !== undefined) updateData.captionType = req.body.captionType;
+    if (req.body.captionPosition !== undefined) updateData.captionPosition = req.body.captionPosition;
+    if (req.body.outtroBackgroundColors !== undefined) updateData.outtroBackgroundColors = req.body.outtroBackgroundColors;
+    if (req.body.outtroFontColor !== undefined) updateData.outtroFontColor = req.body.outtroFontColor;
+    if (req.body.image !== undefined) updateData.image = req.body.image;
+    if (req.body.outroText !== undefined) updateData.outroText = req.body.outroText;
+    if (req.body.outroTheme !== undefined) updateData.outroTheme = req.body.outroTheme;
+    if (req.body.showOutro !== undefined) updateData.showOutro = req.body.showOutro;
+    if (req.body.theme !== undefined) updateData.theme = req.body.theme;
 
     await draftRef.update(updateData);
     const updatedDoc = await draftRef.get();

@@ -9,8 +9,13 @@ const db = admin.firestore();
 router.get('/', verifyToken, async (req, res) => {
   try {
     const userId = req.user.uid;
+    const namespaceId = req.query.namespaceId;
     
-    // Run all queries in parallel
+    if (!namespaceId) {
+      return res.status(400).json({ error: 'namespaceId query parameter is required' });
+    }
+    
+    // Run all queries in parallel, filtering by user and namespaceId
     const [
       campaignsSnapshot,
       surveySnapshot,
@@ -19,14 +24,28 @@ router.get('/', verifyToken, async (req, res) => {
       templatesSnapshot,
       userDoc
     ] = await Promise.all([
-      db.collection('campaigns').where('userId', '==', userId).get(),
-      db.collection('surveyVideos').where('userId', '==', userId).get(),
-      db.collection('alerts').where('userId', '==', userId).where('read', '==', false).get(),
+      db.collection('campaigns')
+        .where('userId', '==', userId)
+        .where('namespaceId', '==', namespaceId)
+        .get(),
+      db.collection('surveyVideos')
+        .where('userId', '==', userId)
+        .where('namespaceId', '==', namespaceId)
+        .get(),
+      db.collection('alerts')
+        .where('userId', '==', userId)
+        .where('namespaceId', '==', namespaceId)
+        .where('read', '==', false)
+        .get(),
       db.collection('creatomateJobs')
         .where('userId', '==', userId)
+        .where('namespaceId', '==', namespaceId)
         .where('status', '==', 'succeeded')
         .get(),
-      db.collection('templates').where('userId', '==', userId).get(),
+      db.collection('templates')
+        .where('userId', '==', userId)
+        .where('namespaceId', '==', namespaceId)
+        .get(),
       db.collection('users').doc(userId).get()
     ]);
     
