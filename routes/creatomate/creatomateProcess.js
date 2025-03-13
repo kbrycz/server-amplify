@@ -7,9 +7,10 @@
  *
  * Endpoints:
  *   POST /creatomate-process
- *     - Initiates processing of a raw video using the Creatomate API.
- *   GET  /creatomate/creatomate-process/status/job/:jobId
- *     - Checks the status of a specific Creatomate processing job.
+ *     - Initiates processing (enhancing) of a raw video using the Creatomate API (commented out).
+ *       Currently, it just marks the video as "enhanced" without actually calling Creatomate.
+ *   GET  /creatomate-process/status/job/:jobId
+ *     - Checks the status of a specific Creatomate processing job (with membership check).
  *   GET  /creatomate/ai-videos/campaign/:campaignId
  *     - Retrieves all completed (succeeded) Creatomate jobs for a given campaign.
  *
@@ -30,6 +31,26 @@ const CREATOMATE_API_URL = 'https://api.creatomate.com/v1/renders';
 const CREATOMATE_API_KEY = process.env.CREATOMATE_API_KEY;
 // Hard-coded template ID – change this value as needed
 const TEMPLATE_ID = '3fbdfb1d-958f-430c-b58c-4d4cf6588efd';
+
+/**
+ * Helper: getUserPermission(namespaceId, userEmail)
+ * Checks if the user is an active member in that namespace,
+ * returns 'admin', 'read/write', 'readonly', or null if not found.
+ */
+async function getUserPermission(namespaceId, userEmail) {
+  if (!namespaceId || !userEmail) return null;
+  const nsDoc = await db.collection('namespaces').doc(namespaceId).get();
+  if (!nsDoc.exists) return null;
+
+  const nsData = nsDoc.data();
+  if (!nsData.members) return null;
+
+  // case-insensitive match
+  const member = nsData.members.find(m =>
+    m.email.toLowerCase() === userEmail.toLowerCase() && m.status === 'active'
+  );
+  return member ? member.permission : null;
+}
 
 /**
  * Helper: Generate a signed URL for a Firebase Storage file.
@@ -53,22 +74,19 @@ async function generateSignedUrl(filePath) {
 
 /**
  * Helper: Download a video from a URL and upload it to Google Cloud Storage.
- *
- * IMPORTANT: Instead of returning a "gs://" URL (which is not playable in browsers),
- * we now return a public HTTPS URL.
+ * For the commented-out Creatomate approach.
  */
 async function downloadAndSaveVideo(videoUrl, campaignId, jobId) {
   try {
     console.info(`[DEBUG] Downloading processed video from Creatomate: ${videoUrl}`);
     const response = await axios.get(videoUrl, { responseType: 'arraybuffer' });
     const videoBuffer = Buffer.from(response.data);
-    const bucket = storage.bucket();
+    const bucket = admin.storage().bucket();
     const fileName = `creatomateVideos/processed/${campaignId}/${jobId}.mp4`;
     const file = bucket.file(fileName);
     await file.save(videoBuffer, {
       metadata: { contentType: 'video/mp4' },
     });
-    // Construct an HTTPS URL for playback. This assumes your bucket files are accessible via storage.googleapis.com.
     const permanentUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
     console.info(`[DEBUG] Processed video saved to GCS: ${permanentUrl}`);
     return permanentUrl;
@@ -81,17 +99,20 @@ async function downloadAndSaveVideo(videoUrl, campaignId, jobId) {
 /**
  * POST /creatomate-process
  *
- * Processes a video using Creatomate.
+ * Enhances a video. Currently, it just sets isVideoEnhanced = true on the doc,
+ * but does not actually call Creatomate (commented out).
  */
 router.post('/creatomate-process', verifyToken, async (req, res) => {
   const userId = req.user.uid;
+  const userEmail = req.user.email;
   const { videoId } = req.body;
+
   if (!videoId) {
     console.warn('[WARN] videoId is required');
     return res.status(400).json({ error: 'videoId is required' });
   }
   try {
-    // Check user credits
+    // Check user doc for credits
     const userRef = db.collection('users').doc(userId);
     const userDoc = await userRef.get();
     if (!userDoc.exists) {
@@ -103,7 +124,8 @@ router.post('/creatomate-process', verifyToken, async (req, res) => {
       console.warn(`[WARN] Insufficient credits for userId: ${userId}`);
       return res.status(403).json({ error: 'Insufficient credits' });
     }
-    // Fetch raw video from "surveyVideos" collection
+
+    // Fetch raw video from "surveyVideos"
     const videoRef = db.collection('surveyVideos').doc(videoId);
     const videoDoc = await videoRef.get();
     if (!videoDoc.exists) {
@@ -112,7 +134,8 @@ router.post('/creatomate-process', verifyToken, async (req, res) => {
     }
     const videoData = videoDoc.data();
     const campaignId = videoData.campaignId;
-    // Verify campaign ownership
+
+    // Fetch the campaign to see if user has "read/write" or "admin" permission
     const campaignRef = db.collection('campaigns').doc(campaignId);
     const campaignDoc = await campaignRef.get();
     if (!campaignDoc.exists) {
@@ -120,122 +143,30 @@ router.post('/creatomate-process', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const campaignData = campaignDoc.data();
-    if (campaignData.userId !== userId) {
-      console.warn(`[WARN] User ${userId} not authorized for campaign ${campaignId}`);
-      return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
+    if (!campaignData.namespaceId) {
+      console.error('[ERROR] Campaign missing namespaceId; cannot check permissions');
+      return res.status(500).json({ error: 'Campaign missing namespaceId' });
     }
-    
-    // Update the survey video document to mark it as enhanced.
-    // This sets isVideoEnhanced to true and videoEnhancedUrl to the same value as videoUrl.
+    const permission = await getUserPermission(campaignData.namespaceId, userEmail);
+    if (!permission || (permission !== 'read/write' && permission !== 'admin')) {
+      console.warn(`[WARN] User ${userId} does not have write permission in namespace ${campaignData.namespaceId}`);
+      return res.status(403).json({ error: 'Insufficient permissions to enhance this video' });
+    }
+
+    // Mark the video as "enhanced" in surveyVideos
     await videoRef.update({
       isVideoEnhanced: true,
-      videoEnhancedUrl: videoData.videoUrl, // For now, set to the original videoUrl
+      videoEnhancedUrl: videoData.videoUrl, // For now, set it to original
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
     console.info(`[INFO] Survey video ${videoId} marked as enhanced.`);
-    // Respond immediately as we no longer process Creatomate jobs.
+
     return res.status(200).json({ message: 'Video enhanced successfully', videoId });
-    
-    /* ----- BEGIN: Comment out Creatomate API call for testing ----- */
-    /*
-    // Generate signed URL for the raw video
-    const videoGsUrl = videoData.videoUrl;
-    const gsPrefix = 'gs://amplify-dev-6b1c7.firebasestorage.app/';
-    if (!videoGsUrl.startsWith(gsPrefix)) {
-      console.error('[ERROR] Invalid video URL format:', videoGsUrl);
-      return res.status(500).json({ error: 'Invalid video URL format' });
-    }
-    const filePath = videoGsUrl.substring(gsPrefix.length);
-    const signedUrl = await generateSignedUrl(filePath);
-    // Build Creatomate API request payload
-    const requestData = {
-      template_id: TEMPLATE_ID,
-      modifications: {
-        "Video-DHM.source": signedUrl
-      }
-    };
-    // Call Creatomate API
-    const creatomateResponse = await axios.post(
-      CREATOMATE_API_URL,
-      requestData,
-      {
-        headers: {
-          'Authorization': `Bearer ${CREATOMATE_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    let responseData = creatomateResponse.data;
-    console.info('[DEBUG] Creatomate API raw response:', responseData);
-    // Normalize response: if array, pick first element
-    const renderResult = Array.isArray(responseData) ? responseData[0] : responseData;
-    console.info('[DEBUG] Normalized render result:', renderResult);
-    const updatePayload = {
-      status: renderResult.status || 'queued',
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    };
-    if (renderResult.id !== undefined) {
-      updatePayload.creatomateJobId = renderResult.id;
-    }
-    if (renderResult.status === 'succeeded' && renderResult.url !== undefined) {
-      const permanentUrl = await downloadAndSaveVideo(renderResult.url, campaignId, localJobId);
-      updatePayload.processedVideoUrl = permanentUrl;
-      updatePayload.snapshotUrl = renderResult.snapshot_url;
-    }
-    await jobRef.update(updatePayload);
-    res.status(202).json({ message: 'Processing started', jobId: localJobId });
-    // Background polling for job status
-    setImmediate(async () => {
-      let pollAttempts = 0;
-      const maxAttempts = 60;
-      let jobStatus = renderResult.status || 'queued';
-      const pollingInterval = setInterval(async () => {
-        pollAttempts++;
-        try {
-          const statusResponse = await axios.get(`${CREATOMATE_API_URL}/${renderResult.id}`, {
-            headers: {
-              'Authorization': `Bearer ${CREATOMATE_API_KEY}`,
-              'Cache-Control': 'no-cache'
-            }
-          });
-          const updatedStatus = statusResponse.data;
-          console.info(`[DEBUG] Polling attempt ${pollAttempts}:`, updatedStatus);
-          jobStatus = updatedStatus.status;
-          const pollUpdate = {
-            status: jobStatus,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          };
-          if (jobStatus === 'succeeded' && updatedStatus.url !== undefined) {
-            const permanentUrl = await downloadAndSaveVideo(updatedStatus.url, campaignId, localJobId);
-            pollUpdate.processedVideoUrl = permanentUrl;
-            pollUpdate.snapshotUrl = updatedStatus.snapshot_url;
-          }
-          await jobRef.update(pollUpdate);
-          if (jobStatus === 'succeeded' || jobStatus === 'failed') {
-            console.info('[DEBUG] Job finished with status:', jobStatus);
-            clearInterval(pollingInterval);
-          }
-        } catch (err) {
-          console.error('[ERROR] Error polling Creatomate status:', err.message);
-          if (err.response && err.response.status === 400) {
-            await jobRef.update({
-              status: 'failed',
-              error: err.response.data.error || '400 error during status polling',
-              updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            });
-            clearInterval(pollingInterval);
-          } else if (pollAttempts >= maxAttempts) {
-            await jobRef.update({
-              status: 'timeout',
-              updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            });
-            clearInterval(pollingInterval);
-          }
-        }
-      }, 5000);
-    });
+
+    /* 
+    // The actual Creatomate code is commented out. If you want to re-enable it,
+    // also update the code to do a membership check, fetch a job doc, etc.
     */
-    /* ----- END: Comment out Creatomate API call for testing ----- */
   } catch (error) {
     console.error('[ERROR] Error initiating Creatomate processing:', error.message);
     return res.status(500).json({ error: 'Failed to initiate video processing', message: error.message });
@@ -246,10 +177,12 @@ router.post('/creatomate-process', verifyToken, async (req, res) => {
  * GET /creatomate-process/status/job/:jobId
  *
  * Checks the status of a specific Creatomate processing job.
+ * We fetch the job doc, then confirm the user is part of that campaign's namespace (if stored).
  */
 router.get('/creatomate-process/status/job/:jobId', verifyToken, async (req, res) => {
   const localJobId = req.params.jobId;
-  const userId = req.user.uid;
+  const userEmail = req.user.email;
+
   try {
     const jobRef = db.collection('creatomateJobs').doc(localJobId);
     const jobDoc = await jobRef.get();
@@ -257,10 +190,26 @@ router.get('/creatomate-process/status/job/:jobId', verifyToken, async (req, res
       return res.status(404).json({ error: 'Job not found' });
     }
     const jobData = jobDoc.data();
-    if (jobData.userId !== userId) {
-      return res.status(403).json({ error: 'Forbidden: You do not own this job' });
+
+    // We assume the job doc references a campaignId. 
+    // If it doesn't, adjust logic accordingly.
+    const campaignRef = db.collection('campaigns').doc(jobData.campaignId);
+    const campaignDoc = await campaignRef.get();
+    if (!campaignDoc.exists) {
+      return res.status(404).json({ error: 'Campaign not found for this job' });
     }
-    // For testing, simply return the job document.
+    const campaignData = campaignDoc.data();
+    if (!campaignData.namespaceId) {
+      return res.status(500).json({ error: 'Campaign missing namespaceId' });
+    }
+    // Check membership in that namespace (any membership allows read?). 
+    // If you want only the job creator or admin to see status, adjust here.
+    const permission = await getUserPermission(campaignData.namespaceId, userEmail);
+    if (!permission) {
+      return res.status(403).json({ error: 'Forbidden: no permission in campaign namespace' });
+    }
+
+    // For testing, just return the job doc
     return res.status(200).json({ id: localJobId, ...jobData });
   } catch (error) {
     console.error('[ERROR] Error checking job status:', error.message);
@@ -272,17 +221,36 @@ router.get('/creatomate-process/status/job/:jobId', verifyToken, async (req, res
  * GET /creatomate/ai-videos/campaign/:campaignId
  *
  * Retrieves all completed (succeeded) Creatomate jobs for a given campaign.
+ * Also checks the user's membership in campaign.namespaceId.
  */
 router.get('/ai-videos/campaign/:campaignId', verifyToken, async (req, res) => {
-  const userId = req.user.uid;
   const campaignId = req.params.campaignId;
+  const userEmail = req.user.email;
+
   try {
+    // Confirm user belongs to that campaign's namespace
+    const campaignRef = db.collection('campaigns').doc(campaignId);
+    const campaignDoc = await campaignRef.get();
+    if (!campaignDoc.exists) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    const campaignData = campaignDoc.data();
+    if (!campaignData.namespaceId) {
+      return res.status(500).json({ error: 'Campaign missing namespaceId' });
+    }
+
+    const permission = await getUserPermission(campaignData.namespaceId, userEmail);
+    if (!permission) {
+      return res.status(403).json({ error: 'Forbidden: no permission for this campaign namespace' });
+    }
+
+    // Now fetch creatomateJobs where status == 'succeeded' and campaignId matches
     const snapshot = await db.collection('creatomateJobs')
       .where('campaignId', '==', campaignId)
-      .where('userId', '==', userId)
       .where('status', '==', 'succeeded')
       .orderBy('createdAt', 'desc')
       .get();
+
     const jobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     return res.status(200).json(jobs);
   } catch (error) {

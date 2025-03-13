@@ -400,20 +400,13 @@ router.delete('/campaigns/:id', verifyToken, async (req, res) => {
 router.get('/campaigns/survey/:id', async (req, res) => {
   try {
     const campaignId = req.params.id;
-    const namespaceId = req.query.namespaceId;
-    if (!namespaceId) {
-      return res.status(400).json({ error: 'namespaceId query parameter is required' });
-    }
-    console.info(`[INFO] Retrieving survey data for campaign ${campaignId} in namespace: ${namespaceId}`);
+    console.info(`[INFO] Retrieving survey data for campaign ${campaignId}`);
     const campaignRef = db.collection('campaigns').doc(campaignId);
     const doc = await campaignRef.get();
     if (!doc.exists) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const campaignData = doc.data();
-    if (campaignData.namespaceId !== namespaceId) {
-      return res.status(403).json({ error: 'Forbidden: Campaign does not belong to this namespace' });
-    }
     const counts = await getCampaignCounts(campaignId);
     console.info(`[INFO] Successfully retrieved survey data for campaign ${campaignId}`);
     return res.status(200).json({ id: doc.id, ...campaignData, ...counts });

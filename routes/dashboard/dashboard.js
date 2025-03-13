@@ -19,23 +19,15 @@ router.get('/', verifyToken, async (req, res) => {
     const [
       campaignsSnapshot,
       surveySnapshot,
-      alertsSnapshot,
       creatomateSnapshot,
-      templatesSnapshot,
-      userDoc
+      templatesSnapshot
     ] = await Promise.all([
       db.collection('campaigns')
-        .where('userId', '==', userId)
-        .where('namespaceId', '==', namespaceId)
+        .where('createdBy', '==', userId)
         .get(),
       db.collection('surveyVideos')
         .where('userId', '==', userId)
         .where('namespaceId', '==', namespaceId)
-        .get(),
-      db.collection('alerts')
-        .where('userId', '==', userId)
-        .where('namespaceId', '==', namespaceId)
-        .where('read', '==', false)
         .get(),
       db.collection('creatomateJobs')
         .where('userId', '==', userId)
@@ -43,10 +35,8 @@ router.get('/', verifyToken, async (req, res) => {
         .where('status', '==', 'succeeded')
         .get(),
       db.collection('templates')
-        .where('userId', '==', userId)
-        .where('namespaceId', '==', namespaceId)
-        .get(),
-      db.collection('users').doc(userId).get()
+        .where('createdBy', '==', userId)
+        .get()
     ]);
     
     // Total campaigns count
@@ -54,39 +44,20 @@ router.get('/', verifyToken, async (req, res) => {
     
     // Total survey responses (collected responses)
     const responsesCount = surveySnapshot.size;
-    
-    // Calculate total reach as the count of unique email addresses in survey responses
-    const uniqueEmails = new Set();
-    surveySnapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.email) {
-        uniqueEmails.add(data.email);
-      }
-    });
-    const reachCount = uniqueEmails.size;
-    
-    // Unread responses (from alerts)
-    const unreadCount = alertsSnapshot.size;
-    
+
     // Videos generated (using creatomate jobs with status "succeeded")
     const videosCount = creatomateSnapshot.size;
-    
+
     // Total templates available
     const templatesCount = templatesSnapshot.size;
     
-    // Get user profile data
-    const userData = userDoc.exists ? userDoc.data() : null;
-    
     return res.status(200).json({
       metrics: {
-        unread: unreadCount,         // Unread responses
-        collected: responsesCount,     // Total survey responses
-        campaigns: campaignsCount,     // Total campaigns created
-        users: reachCount,             // Total unique users (reach)
-        videos: videosCount,           // AI videos generated (via creatomate)
-        templates: templatesCount      // Total templates available
-      },
-      user: userData
+        campaigns: campaignsCount,  // Total campaigns created
+        collected: responsesCount,  // Total survey responses
+        videos: videosCount,        // AI videos generated (via creatomate)
+        templates: templatesCount   // Total templates available
+      }
     });
   } catch (error) {
     console.error('[ERROR] Error fetching dashboard metrics:', error);

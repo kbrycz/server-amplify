@@ -21,6 +21,7 @@ const creatomateProcessRoutes = require('./routes/creatomate/creatomateProcess')
 const dashboardRoutes = require('./routes/dashboard/dashboard');
 const healthRoutes = require('./routes/health/health');
 const namespacesRoutes = require('./routes/namespaces/namespaces');
+const inviteRoutes = require('./routes/activity/invites');
 
 
 const app = express();
@@ -57,6 +58,7 @@ app.use('/creatomate', creatomateProcessRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/health', healthRoutes);
 app.use('/namespaces', namespacesRoutes);
+app.use('/invites', inviteRoutes);
 
 
 

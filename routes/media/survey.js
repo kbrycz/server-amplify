@@ -2,6 +2,9 @@
  * Survey API
  *
  * This module handles survey video uploads and retrieval for campaigns.
+ * In a namespace-based design, multiple users can share a campaign. Therefore,
+ * we check the campaign's namespace and see if the requesting user has permission there,
+ * rather than checking only if (campaignData.userId === userId).
  *
  * Endpoints:
  *   POST /survey/upload
@@ -13,6 +16,8 @@
  *     - Authenticated endpoint to count the survey videos for a specific campaign.
  *   GET /survey/video/:videoId
  *     - Authenticated endpoint to retrieve a specific survey video by its video ID.
+ *   GET /survey/videos/enhanced/count
+ *     - Authenticated endpoint to count how many videos are “enhanced”.
  *
  * @example
  *   // Upload a survey video:
@@ -45,14 +50,33 @@ const upload = multer({
 const db = admin.firestore();
 const storage = admin.storage();
 
-/**
- * POST /survey/upload
- * Public endpoint to upload a survey video.
- * Expects a "video" file along with metadata such as campaignId, firstName, etc.
- */
+// ------------------------------------------------------
+// Helper function to check user permission in a namespace
+// ------------------------------------------------------
+async function getUserPermission(namespaceId, userEmail) {
+  // If namespaceId doesn't exist or userEmail is missing, return null
+  if (!namespaceId || !userEmail) return null;
+
+  const nsDoc = await db.collection('namespaces').doc(namespaceId).get();
+  if (!nsDoc.exists) return null;
+
+  const nsData = nsDoc.data();
+  if (!nsData.members) return null;
+
+  // Find member in the namespace with matching email (case-insensitive) and status active
+  const member = nsData.members.find(m =>
+    m.email.toLowerCase() === userEmail.toLowerCase() && m.status === 'active'
+  );
+
+  // Return e.g. 'admin', 'read/write', 'readonly' or null if none
+  return member ? member.permission : null;
+}
+
+// ------------------------------------------------------
+// POST /survey/upload  (Public endpoint)
+// ------------------------------------------------------
 router.post('/upload', upload.single('video'), async (req, res) => {
   console.info('[INFO] POST /survey/upload - Received request');
-  console.debug('[DEBUG] Request Headers:', req.headers);
   console.debug('[DEBUG] Request Body:', req.body);
   console.debug('[DEBUG] File Present:', !!req.file);
 
@@ -70,11 +94,6 @@ router.post('/upload', upload.single('video'), async (req, res) => {
       console.warn('[WARN] Video file is required');
       return res.status(400).json({ error: 'Video file is required' });
     }
-    console.info('[INFO] File Details:', {
-      originalName: req.file.originalname,
-      size: req.file.size,
-      mimetype: req.file.mimetype
-    });
 
     // Verify the campaign exists
     console.info(`[INFO] Verifying campaign existence for campaignId: ${campaignId}`);
@@ -88,23 +107,23 @@ router.post('/upload', upload.single('video'), async (req, res) => {
 
     // Get the userId from the campaign
     const campaignData = campaignDoc.data();
-    const userId = campaignData.userId;
+    const userId = campaignData.createdBy || campaignData.userId; // If you use userId or createdBy
     if (!userId) {
-      console.error('[ERROR] Campaign does not have an associated userId');
+      console.error('[ERROR] Campaign does not have an associated userId/createdBy');
       return res.status(500).json({ error: 'Campaign does not have an associated userId' });
     }
 
-    // Create a new document in surveyVideos collection with new fields for enhanced video
+    // Create a new document in surveyVideos
     const videoData = {
       campaignId,
-      userId,
+      userId, // This is the original owner's userId. If you want to store differently, adjust accordingly.
       firstName: firstName || '',
       lastName: lastName || '',
       email: email || '',
       zipCode: zipCode || '',
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      isVideoEnhanced: false,  // Default set to false
-      videoEnhancedUrl: ''     // Default empty string
+      isVideoEnhanced: false,
+      videoEnhancedUrl: ''
     };
     console.info('[INFO] Creating new surveyVideos document with data:', videoData);
     const videoRef = await db.collection('surveyVideos').add(videoData);
@@ -153,20 +172,18 @@ router.post('/upload', upload.single('video'), async (req, res) => {
   }
 });
 
-/**
- * GET /survey/videos/:campaignId
- * Authenticated endpoint to retrieve survey videos for a campaign.
- * Returns videos sorted by createdAt in descending order.
- */
+// ------------------------------------------------------
+// GET /survey/videos/:campaignId
+// Authenticated endpoint to retrieve survey videos for a campaign.
+// We now rely on the campaign's namespace to see if the user has permission.
+// ------------------------------------------------------
 router.get('/videos/:campaignId', verifyToken, async (req, res) => {
-  console.info('[INFO] GET /survey/videos/:campaignId - Received request');
-  const campaignId = req.params.campaignId;
-  const userId = req.user.uid;
-  console.info(`[INFO] Campaign ID: ${campaignId}, User ID: ${userId}`);
-
   try {
-    // Verify campaign ownership
-    console.info(`[INFO] Verifying campaign ownership for campaignId: ${campaignId}`);
+    console.info('[INFO] GET /survey/videos/:campaignId - Received request');
+    const campaignId = req.params.campaignId;
+    const userEmail = req.user.email;
+
+    // Retrieve the campaign to get its namespaceId
     const campaignRef = db.collection('campaigns').doc(campaignId);
     const campaignDoc = await campaignRef.get();
     if (!campaignDoc.exists) {
@@ -174,11 +191,20 @@ router.get('/videos/:campaignId', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const campaignData = campaignDoc.data();
-    if (campaignData.userId !== userId) {
-      console.warn(`[WARN] User ${userId} does not own campaign ${campaignId}`);
-      return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
+    if (!campaignData.namespaceId) {
+      console.error('[ERROR] Campaign has no namespaceId (namespace-based sharing not possible).');
+      return res.status(500).json({ error: 'Campaign missing namespaceId' });
     }
 
+    // Check user's permission in that namespace
+    const permission = await getUserPermission(campaignData.namespaceId, userEmail);
+    if (!permission) {
+      // Or if you want only "read/write" or "admin" to read, that's up to your policy
+      // if (!['read/write','admin'].includes(permission)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have permission in this namespace' });
+    }
+
+    // If permissible, fetch survey videos
     console.info(`[INFO] Querying surveyVideos for campaignId: ${campaignId}`);
     const snapshot = await db.collection('surveyVideos')
       .where('campaignId', '==', campaignId)
@@ -190,15 +216,13 @@ router.get('/videos/:campaignId', verifyToken, async (req, res) => {
     for (const doc of snapshot.docs) {
       const videoData = doc.data();
       const videoId = doc.id;
-      console.info(`[INFO] Processing video ID: ${videoId}`);
 
+      // Generate a signed URL for the video in Cloud Storage
       const file = storage.bucket().file(`videos/${campaignId}/${videoId}.mp4`);
-      console.info(`[INFO] Generating signed URL for: videos/${campaignId}/${videoId}.mp4`);
       const [url] = await file.getSignedUrl({
         action: 'read',
         expires: Date.now() + 60 * 60 * 1000 // 1 hour expiry
       });
-      console.info(`[INFO] Signed URL generated: ${url}`);
 
       videos.push({
         id: videoId,
@@ -211,36 +235,39 @@ router.get('/videos/:campaignId', verifyToken, async (req, res) => {
     return res.status(200).json(videos);
   } catch (error) {
     console.error('[ERROR] Error in GET /survey/videos/:campaignId endpoint:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 });
 
-/**
- * GET /survey/videos/:campaignId/count
- * Authenticated endpoint to count survey videos for a campaign.
- */
+// ------------------------------------------------------
+// GET /survey/videos/:campaignId/count
+// Authenticated endpoint to count survey videos for a campaign.
+// Using the same namespace-based approach as above.
+// ------------------------------------------------------
 router.get('/videos/:campaignId/count', verifyToken, async (req, res) => {
-  console.info('[INFO] GET /survey/videos/:campaignId/count - Received request');
-  const { campaignId } = req.params;
-  const userId = req.user.uid;
-  console.info(`[INFO] Campaign ID: ${campaignId}, User ID: ${userId}`);
-
   try {
-    // Verify campaign existence and ownership
-    console.info(`[INFO] Verifying campaign existence for campaignId: ${campaignId}`);
+    console.info('[INFO] GET /survey/videos/:campaignId/count - Received request');
+    const campaignId = req.params.campaignId;
+    const userEmail = req.user.email;
+
+    // Retrieve the campaign to see if user has permission
     const campaignRef = db.collection('campaigns').doc(campaignId);
     const campaignDoc = await campaignRef.get();
     if (!campaignDoc.exists) {
-      console.warn(`[WARN] Campaign not found for campaignId: ${campaignId}`);
       return res.status(404).json({ error: 'Campaign not found' });
     }
     const campaignData = campaignDoc.data();
-    if (campaignData.userId !== userId) {
-      console.warn(`[WARN] User ${userId} does not own campaign ${campaignId}`);
-      return res.status(403).json({ error: 'Forbidden: You do not own this campaign' });
+    if (!campaignData.namespaceId) {
+      return res.status(500).json({ error: 'Campaign missing namespaceId' });
     }
 
-    console.info(`[INFO] Counting videos for campaignId: ${campaignId}`);
+    // Check permission in that namespace
+    const permission = await getUserPermission(campaignData.namespaceId, userEmail);
+    if (!permission) {
+      return res.status(403).json({ error: 'Forbidden: You do not have permission in this namespace' });
+    }
+
+    // Count videos
     const snapshot = await db.collection('surveyVideos')
       .where('campaignId', '==', campaignId)
       .get();
@@ -254,48 +281,52 @@ router.get('/videos/:campaignId/count', verifyToken, async (req, res) => {
   }
 });
 
-/**
- * GET /survey/video/:videoId
- * Authenticated endpoint to retrieve a specific survey video by its video ID.
- */
+// ------------------------------------------------------
+// GET /survey/video/:videoId
+// Authenticated endpoint to retrieve a single survey video doc
+// We'll fetch its campaign, do the same namespace-based check,
+// then generate a signed URL for the video file
+// ------------------------------------------------------
 router.get('/video/:videoId', verifyToken, async (req, res) => {
-  console.info('[INFO] GET /survey/video/:videoId - Received request');
-  const videoId = req.params.videoId;
-  const userId = req.user.uid;
-
   try {
-    // Fetch the video document
+    console.info('[INFO] GET /survey/video/:videoId - Received request');
+    const videoId = req.params.videoId;
+    const userEmail = req.user.email;
+
+    // Fetch the video doc
     const videoRef = db.collection('surveyVideos').doc(videoId);
     const videoDoc = await videoRef.get();
     if (!videoDoc.exists) {
-      console.warn(`[WARN] Video not found for videoId: ${videoId}`);
       return res.status(404).json({ error: 'Video not found' });
     }
     const videoData = videoDoc.data();
 
-    // Verify campaign ownership by checking the associated campaign
+    // Verify the associated campaign
     const campaignRef = db.collection('campaigns').doc(videoData.campaignId);
     const campaignDoc = await campaignRef.get();
     if (!campaignDoc.exists) {
-      console.warn(`[WARN] Campaign not found for videoId: ${videoId}`);
       return res.status(404).json({ error: 'Campaign not found for this video' });
     }
     const campaignData = campaignDoc.data();
-    if (campaignData.userId !== userId) {
-      console.warn(`[WARN] User ${userId} is not authorized to access video ${videoId}`);
-      return res.status(403).json({ error: 'Forbidden: You do not own this video' });
+
+    if (!campaignData.namespaceId) {
+      return res.status(500).json({ error: 'Campaign missing namespaceId' });
+    }
+
+    // Check user's permission in that namespace
+    const permission = await getUserPermission(campaignData.namespaceId, userEmail);
+    if (!permission) {
+      return res.status(403).json({ error: 'Forbidden: You do not have permission in this namespace' });
     }
 
     // Generate a signed URL for the video file from Cloud Storage
     const bucket = storage.bucket();
     const fileName = `videos/${videoData.campaignId}/${videoId}.mp4`;
     const file = bucket.file(fileName);
-    console.info(`[INFO] Generating signed URL for: ${fileName}`);
     const [signedUrl] = await file.getSignedUrl({
       action: 'read',
       expires: Date.now() + 60 * 60 * 1000 // 1 hour expiry
     });
-    console.info(`[INFO] Signed URL generated: ${signedUrl}`);
 
     return res.status(200).json({
       id: videoId,
@@ -308,16 +339,20 @@ router.get('/video/:videoId', verifyToken, async (req, res) => {
   }
 });
 
-/**
- * GET /survey/videos/enhanced/count
- * Authenticated endpoint to count survey videos that have been enhanced.
- * It filters documents where isVideoEnhanced is true.
- */
+// ------------------------------------------------------
+// GET /survey/videos/enhanced/count
+// Authenticated endpoint to count all “enhanced” videos belonging to the user
+// If you want it to be namespace-based, you’d do a separate approach or
+// query the user’s membership. The logic below is the old approach that checks userId.
+// You can adapt it to do an “in array of possible userId’s” or do a namespace filter.
+// ------------------------------------------------------
 router.get('/videos/enhanced/count', verifyToken, async (req, res) => {
   console.info('[INFO] GET /survey/videos/enhanced/count - Received request');
   const userId = req.user.uid;
+
   try {
     // Query surveyVideos for documents where 'isVideoEnhanced' is true
+    // You might want to do a join with the campaign’s namespace or user membership
     const snapshot = await db.collection('surveyVideos')
       .where('userId', '==', userId)
       .where('isVideoEnhanced', '==', true)

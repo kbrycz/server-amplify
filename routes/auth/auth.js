@@ -4,9 +4,8 @@
  * This module handles authentication-related endpoints for user profile management,
  * including updating subscription plans, signing up users, fetching profiles, and account deletion.
  *
- * When a new user signs up, a default namespace is automatically created. Rather than storing a list
- * of namespaces on the user profile, we recommend querying the namespaces collection to check which namespaces
- * a user belongs to.
+ * When a new user signs up, a default namespace is automatically created. We also store that
+ * namespace's document ID on the user record as "defaultNamespace" for easy reference.
  *
  * Endpoints:
  *   POST /update-plan        - Update the user's plan to 'basic' and reset credits.
@@ -89,15 +88,13 @@ router.post('/signup', verifyToken, async (req, res) => {
     console.log(`[INFO] User profile created for UID: ${uid}`);
 
     // Create a default namespace for the new user.
-    // We do not store a list of namespaces on the user profile;
-    // instead, when needed you can query the namespaces collection by filtering on members.
-    const defaultNamespace = {
+    const defaultNamespaceData = {
       name: 'default',
       description: `Default namespace for ${firstName} ${lastName}`,
       accountId: uid,
       // The default namespace will only include the creator as a member.
       // The user is assigned an "admin" role here for default operations,
-      // but this namespace is not meant to be modified by the user to add more members.
+      // but you can enforce logic elsewhere to disallow them from adding members or deleting it.
       members: [{
         email,
         permission: 'admin',
@@ -107,12 +104,19 @@ router.post('/signup', verifyToken, async (req, res) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
 
+    let defaultNamespaceRef = null;
     try {
-      await admin.firestore().collection('namespaces').add(defaultNamespace);
-      console.log(`[INFO] Default namespace created for UID: ${uid}`);
+      defaultNamespaceRef = await admin.firestore().collection('namespaces').add(defaultNamespaceData);
+      console.log(`[INFO] Default namespace created for UID: ${uid}, namespaceId: ${defaultNamespaceRef.id}`);
+
+      // Store the namespace ID on the user record
+      await admin.firestore().collection('users').doc(uid).update({
+        defaultNamespace: defaultNamespaceRef.id
+      });
     } catch (nsError) {
       console.error(`[ERROR] Failed to create default namespace for UID ${uid}:`, nsError.message);
       // Proceed without failing the signup process.
+      // The user profile is created but no defaultNamespace is stored.
     }
 
     return res.status(201).json({
